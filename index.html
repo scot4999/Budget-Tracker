@@ -1523,62 +1523,76 @@ function MobilePeriodSwiper({
     else if (todayD > end) dayPct = 100;
   }
 
-  return (
-    <div className="pwa-view" style={{ position:'relative', width:'100%' }}>
-      {/* Month header */}
-      <div style={{ textAlign:'center', marginBottom:12, padding:'0 16px' }}>
-        <div style={{ fontSize:13, color:'#64748b', marginBottom:2 }}>{p ? p.dateLabel : `Period ${activePeriod+1}`}</div>
-        <div style={{ fontSize:12, color:'#475569' }}>
-          {pp.unpaidAmt > 0 && <span style={{ color:'#fbbf24' }}>⚠ {fmt(pp.unpaidAmt)} in unpaid bills</span>}
-        </div>
-      </div>
+  // Shared section style — no border-radius on sides, bleeds edge to edge
+  const SEC = { background:'#1e293b', marginBottom:2, width:'100%' };
+  const HDR = { display:'flex', justifyContent:'space-between', alignItems:'center',
+                padding:'16px 16px', cursor:'pointer', userSelect:'none' };
 
-      {/* Swiper */}
-      <div ref={trackRef} className="pwa-swiper-wrap"
+  return (
+    <div style={{ position:'relative', width:'100%', overflowX:'hidden' }}>
+
+      {/* ── Balance hero — swipeable ── */}
+      <div ref={trackRef} style={{ overflow:'hidden', width:'100%', touchAction:'pan-y' }}
         onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
-        <div className="pwa-swiper-track"
-          style={{ transform:`translateX(${translateX}%)`, transition: dragging ? 'none' : undefined }}>
+        <div style={{ display:'flex', transition: dragging?'none':'transform 0.3s cubic-bezier(.4,0,.2,1)',
+                      transform:`translateX(calc(${-activePeriod*100}% + ${dragX}px))` }}>
           {Array.from({length:numPeriods}, (_,pi) => {
             const ppi = perPeriod[pi];
             const pp_p = periods[pi];
+            const uPct = ppi.totalInc>0 ? Math.min(100,(ppi.used/ppi.totalInc)*100) : 0;
             return (
-              <div key={pi} className="pwa-period-card">
-                {/* Big balance card */}
-                <div style={{ background:'#1e293b', borderRadius:16, padding:'22px 20px', marginBottom:12 }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:18 }}>
-                    <div>
-                      <div style={{ fontSize:12, color:'#475569', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>Remaining</div>
-                      <div style={{ fontSize:42, fontWeight:800, color:ppi.remaining>=0?'#34d399':'#f87171', lineHeight:1 }}>
-                        {fmtS(ppi.remaining)}
-                      </div>
+              <div key={pi} style={{ flex:'0 0 100%', width:'100%', background:'#1e293b', padding:'20px 16px 18px' }}>
+                {/* Period label */}
+                <div style={{ fontSize:12, color:'#64748b', marginBottom:8, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ textTransform:'uppercase', letterSpacing:'0.07em' }}>
+                    Period {pi+1}{pp_p ? ` · ${pp_p.dateLabel}` : ''}
+                  </span>
+                  {numPeriods > 1 && (
+                    <div style={{ display:'flex', gap:6 }}>
+                      {Array.from({length:numPeriods},(_,di)=>(
+                        <div key={di} onClick={()=>setActivePeriod(di)}
+                          style={{ width:7, height:7, borderRadius:'50%', cursor:'pointer',
+                            background: di===activePeriod?'#3b82f6':'#334155',
+                            transform: di===activePeriod?'scale(1.4)':'scale(1)',
+                            transition:'all 0.2s' }} />
+                      ))}
                     </div>
-                    <div style={{ textAlign:'right' }}>
-                      <div style={{ fontSize:12, color:'#475569', marginBottom:4 }}>Started with</div>
-                      <div style={{ fontSize:18, fontWeight:700, color:'#94a3b8' }}>{fmt(ppi.totalInc)}</div>
-                    </div>
+                  )}
+                </div>
+
+                {/* BIG remaining balance */}
+                <div style={{ marginBottom:16 }}>
+                  <div style={{ fontSize:13, color:'#94a3b8', marginBottom:4 }}>Remaining</div>
+                  <div style={{ fontSize:52, fontWeight:900, color:ppi.remaining>=0?'#34d399':'#f87171',
+                                lineHeight:1, letterSpacing:'-0.02em' }}>
+                    {fmtS(ppi.remaining)}
                   </div>
-                  {/* Progress bar */}
-                  <div style={{ height:10, background:'#0f1117', borderRadius:5, overflow:'hidden', marginBottom:12 }}>
-                    <div style={{ width:`${usedPct}%`, height:'100%', background:ppi.remaining>=0?'#3b82f6':'#f87171', borderRadius:5, transition:'width 0.4s' }} />
-                  </div>
-                  {/* 3 key numbers */}
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
-                    <div style={{ background:'#0f1117', borderRadius:10, padding:'10px 8px', textAlign:'center' }}>
-                      <div style={{ fontSize:11, color:'#475569', marginBottom:4 }}>Bills</div>
-                      <div style={{ fontSize:16, fontWeight:700, color:'#f87171' }}>{fmt(ppi.paidBillAmt)}</div>
-                      <div style={{ fontSize:10, color:'#334155' }}>of {fmt(ppi.billsTotal - ppi.tithe)}</div>
+                  {ppi.unpaidAmt > 0 && (
+                    <div style={{ fontSize:13, color:'#fbbf24', marginTop:6 }}>
+                      ⚠ {fmt(ppi.unpaidAmt)} in unpaid bills
                     </div>
-                    <div style={{ background:'#0f1117', borderRadius:10, padding:'10px 8px', textAlign:'center' }}>
-                      <div style={{ fontSize:11, color:'#475569', marginBottom:4 }}>Spent</div>
-                      <div style={{ fontSize:16, fontWeight:700, color:'#fbbf24' }}>{fmt(ppi.txnSpent)}</div>
-                      <div style={{ fontSize:10, color:'#334155' }}>{pTxns.length} txn{pTxns.length!==1?'s':''}</div>
+                  )}
+                </div>
+
+                {/* Progress bar */}
+                <div style={{ height:8, background:'#0f1117', borderRadius:4, overflow:'hidden', marginBottom:16 }}>
+                  <div style={{ height:'100%', borderRadius:4, transition:'width 0.4s',
+                                width:`${uPct}%`, background:ppi.remaining>=0?'#3b82f6':'#f87171' }} />
+                </div>
+
+                {/* 3 stat tiles */}
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+                  {[
+                    { label:'Bills paid',  value:fmt(ppi.paidBillAmt),  sub:`of ${fmt(ppi.billsTotal-ppi.tithe)}`, color:'#f87171' },
+                    { label:'Spent',       value:fmt(ppi.txnSpent),      sub:`${(mo.txns||[]).filter(t=>(t.periodIdx??0)===pi).length} txns`, color:'#fbbf24' },
+                    { label:'Estimated',   value:fmtS(ppi.estimated),    sub:'after all',  color:ppi.estimated>=0?'#60a5fa':'#f87171' },
+                  ].map(({label,value,sub,color}) => (
+                    <div key={label} style={{ background:'#0f1117', borderRadius:10, padding:'12px 8px', textAlign:'center' }}>
+                      <div style={{ fontSize:11, color:'#64748b', marginBottom:4, textTransform:'uppercase', letterSpacing:'0.05em' }}>{label}</div>
+                      <div style={{ fontSize:17, fontWeight:800, color }}>{value}</div>
+                      <div style={{ fontSize:10, color:'#334155', marginTop:3 }}>{sub}</div>
                     </div>
-                    <div style={{ background:'#0f1117', borderRadius:10, padding:'10px 8px', textAlign:'center' }}>
-                      <div style={{ fontSize:11, color:'#475569', marginBottom:4 }}>Estimated</div>
-                      <div style={{ fontSize:16, fontWeight:700, color:ppi.estimated>=0?'#60a5fa':'#f87171' }}>{fmtS(ppi.estimated)}</div>
-                      <div style={{ fontSize:10, color:'#334155' }}>after all</div>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </div>
             );
@@ -1586,86 +1600,88 @@ function MobilePeriodSwiper({
         </div>
       </div>
 
-      {/* Dot indicators */}
-      {numPeriods > 1 && (
-        <div className="pwa-dots">
-          {Array.from({length:numPeriods}, (_,pi) => (
-            <div key={pi} className={`pwa-dot${pi===activePeriod?' active':''}`}
-              onClick={()=>setActivePeriod(pi)} style={{ cursor:'pointer' }} />
-          ))}
-        </div>
-      )}
-
-      {/* Bills accordion */}
-      <div style={{ background:'#1e293b', borderRadius:14, padding:'0 16px', marginBottom:10 }}>
-        <div className="pwa-accordion-hdr" onClick={()=>toggleOpen('bills')}>
-          <span style={{ fontSize:15, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:8 }}>
-            <i className="fa-solid fa-receipt" style={{ color:ACCENT.bills, fontSize:14 }} />
+      {/* ── Bills ── */}
+      <div style={SEC}>
+        <div style={HDR} onClick={()=>toggleOpen('bills')}>
+          <span style={{ fontSize:17, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:10 }}>
+            <i className="fa-solid fa-receipt" style={{ color:ACCENT.bills }} />
             Bills
-            <span style={{ fontSize:12, color: pp.unpaidAmt>0?'#fbbf24':'#34d399', fontWeight:400, marginLeft:4 }}>
+            <span style={{ fontSize:14, color:pp.unpaidAmt>0?'#fbbf24':'#34d399', fontWeight:500 }}>
               {pBills.filter(b=>paid[b.id]).length}/{pBills.length} paid
             </span>
           </span>
-          <i className={`fa-solid fa-chevron-${open.bills?'up':'down'}`} style={{ fontSize:12, color:'#475569' }} />
+          <i className={`fa-solid fa-chevron-${open.bills?'up':'down'}`} style={{ color:'#475569' }} />
         </div>
         {open.bills && (
-          <div style={{ paddingBottom:12 }}>
-            {pBills.length === 0 && <div style={{ color:'#475569', fontSize:13, padding:'8px 0' }}>No bills this period</div>}
+          <div style={{ paddingBottom:8 }}>
+            {pBills.length === 0 && <div style={{ color:'#475569', fontSize:15, padding:'10px 16px' }}>No bills this period</div>}
             {pBills.map(b => (
-              <div key={b.id} className="pwa-bill-row" onClick={()=>toggleBillPaid(b.id)}>
-                <div className={`pwa-bill-check${paid[b.id]?' checked':''}`}>
-                  {paid[b.id] && <i className="fa-solid fa-check" style={{ fontSize:13, color:'#fff' }} />}
+              <div key={b.id} onClick={()=>toggleBillPaid(b.id)}
+                style={{ display:'flex', alignItems:'center', gap:14, padding:'14px 16px',
+                         borderTop:'1px solid #0f1117', cursor:'pointer',
+                         background: paid[b.id] ? '#0f1117' : 'transparent' }}>
+                {/* Custom checkbox */}
+                <div style={{ width:28, height:28, borderRadius:8, flexShrink:0, display:'flex',
+                              alignItems:'center', justifyContent:'center',
+                              background: paid[b.id]?'#3b82f6':'transparent',
+                              border: paid[b.id]?'2px solid #3b82f6':'2px solid #334155',
+                              transition:'all 0.15s' }}>
+                  {paid[b.id] && <i className="fa-solid fa-check" style={{ fontSize:14, color:'#fff' }} />}
                 </div>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:15, fontWeight:600, color:paid[b.id]?'#475569':'#e2e8f0', textDecoration:paid[b.id]?'line-through':'none', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  <div style={{ fontSize:17, fontWeight:600,
+                                color:paid[b.id]?'#475569':'#e2e8f0',
+                                textDecoration:paid[b.id]?'line-through':'none',
+                                overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                     {b.name}
                   </div>
-                  {b.dueDay && <div style={{ fontSize:12, color:'#64748b', marginTop:2 }}>Due {ordinal(b.dueDay)}</div>}
+                  {b.dueDay && <div style={{ fontSize:13, color:'#64748b', marginTop:2 }}>Due {ordinal(b.dueDay)}</div>}
                 </div>
-                <div style={{ fontSize:16, fontWeight:700, color:paid[b.id]?'#475569':'#e2e8f0', flexShrink:0 }}>
+                <div style={{ fontSize:18, fontWeight:700, color:paid[b.id]?'#334155':'#e2e8f0', flexShrink:0 }}>
                   {fmt(effectiveBillAmt(b))}
                 </div>
               </div>
             ))}
-            <div style={{ display:'flex', justifyContent:'space-between', paddingTop:10, fontSize:13, color:'#475569' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', padding:'12px 16px',
+                          borderTop:'1px solid #0f1117', fontSize:14, color:'#475569' }}>
               <span>Bills total</span>
-              <span style={{ color:'#f87171', fontWeight:700 }}>{fmt(pp.billsTotal - pp.tithe)}</span>
+              <span style={{ color:'#f87171', fontWeight:700, fontSize:16 }}>{fmt(pp.billsTotal - pp.tithe)}</span>
             </div>
           </div>
         )}
       </div>
 
-      {/* Categories accordion */}
+      {/* ── Category Budgets ── */}
       {Object.keys(pBudgets).length > 0 && (
-        <div style={{ background:'#1e293b', borderRadius:14, padding:'0 16px', marginBottom:10 }}>
-          <div className="pwa-accordion-hdr" onClick={()=>toggleOpen('cats')}>
-            <span style={{ fontSize:15, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:8 }}>
-              <i className="fa-solid fa-sliders" style={{ color:ACCENT.budget, fontSize:14 }} />
+        <div style={SEC}>
+          <div style={HDR} onClick={()=>toggleOpen('cats')}>
+            <span style={{ fontSize:17, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:10 }}>
+              <i className="fa-solid fa-sliders" style={{ color:ACCENT.budget }} />
               Budgets
             </span>
-            <i className={`fa-solid fa-chevron-${open.cats?'up':'down'}`} style={{ fontSize:12, color:'#475569' }} />
+            <i className={`fa-solid fa-chevron-${open.cats?'up':'down'}`} style={{ color:'#475569' }} />
           </div>
           {open.cats && (
-            <div style={{ paddingBottom:12 }}>
+            <div style={{ paddingBottom:8 }}>
               {Object.entries(pBudgets).map(([cat, limit]) => {
                 const spent = pSpent[cat]||0;
-                const pct = limit > 0 ? (spent/limit)*100 : 0;
-                const velocity = dayPct !== null && limit > 0 ? pct/(dayPct||1) : null;
-                const hot = velocity !== null && velocity > 1.25 && pct < 100;
+                const pct = limit>0 ? (spent/limit)*100 : 0;
+                const velocity = dayPct!==null && limit>0 ? pct/(dayPct||1) : null;
+                const hot = velocity!==null && velocity>1.25 && pct<100;
                 const color = pct>90?'#f87171':pct>70?'#fbbf24':'#34d399';
                 return (
-                  <div key={cat} className="pwa-cat-row">
-                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                      <span style={{ fontSize:15, fontWeight:600, color:'#e2e8f0' }}>{cat}{hot&&' 🔥'}</span>
-                      <span style={{ fontSize:14, color, fontWeight:700 }}>{fmt(spent)} <span style={{ color:'#475569', fontWeight:400 }}>/ {fmt(limit)}</span></span>
+                  <div key={cat} style={{ padding:'12px 16px', borderTop:'1px solid #0f1117' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:8 }}>
+                      <span style={{ fontSize:17, fontWeight:700, color:'#e2e8f0' }}>{cat}{hot?' 🔥':''}</span>
+                      <span style={{ fontSize:15, color, fontWeight:700 }}>
+                        {fmt(spent)}<span style={{ color:'#475569', fontWeight:400, fontSize:13 }}> / {fmt(limit)}</span>
+                      </span>
                     </div>
-                    <div style={{ position:'relative', height:8, background:'#0f1117', borderRadius:4, overflow:'hidden' }}>
-                      {dayPct!==null && <div style={{ position:'absolute', left:0, top:0, width:`${Math.min(100,dayPct)}%`, height:'100%', background:'#334155', borderRadius:4 }} />}
-                      <div style={{ position:'absolute', left:0, top:0, width:`${Math.min(100,pct)}%`, height:'100%', background:color, borderRadius:4, transition:'width 0.4s' }} />
+                    <div style={{ position:'relative', height:10, background:'#0f1117', borderRadius:5, overflow:'hidden', marginBottom:6 }}>
+                      {dayPct!==null && <div style={{ position:'absolute', left:0, top:0, height:'100%', background:'#334155', borderRadius:5, width:`${Math.min(100,dayPct)}%` }} />}
+                      <div style={{ position:'absolute', left:0, top:0, height:'100%', background:color, borderRadius:5, transition:'width 0.4s', width:`${Math.min(100,pct)}%` }} />
                     </div>
-                    <div style={{ fontSize:12, color:'#475569', marginTop:4, textAlign:'right' }}>
-                      {fmt(Math.max(0,limit-spent))} left
-                    </div>
+                    <div style={{ fontSize:13, color:'#64748b', textAlign:'right' }}>{fmt(Math.max(0,limit-spent))} left</div>
                   </div>
                 );
               })}
@@ -1674,33 +1690,40 @@ function MobilePeriodSwiper({
         </div>
       )}
 
-      {/* Transactions accordion */}
-      <div style={{ background:'#1e293b', borderRadius:14, padding:'0 16px', marginBottom:80 }}>
-        <div className="pwa-accordion-hdr" onClick={()=>toggleOpen('txns')}>
-          <span style={{ fontSize:15, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:8 }}>
-            <i className="fa-solid fa-list-ul" style={{ color:ACCENT.budget, fontSize:14 }} />
+      {/* ── Transactions ── */}
+      <div style={{ ...SEC, marginBottom:100 }}>
+        <div style={HDR} onClick={()=>toggleOpen('txns')}>
+          <span style={{ fontSize:17, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:10 }}>
+            <i className="fa-solid fa-list-ul" style={{ color:ACCENT.budget }} />
             Transactions
-            <span style={{ fontSize:12, color:'#475569', fontWeight:400 }}>{pTxns.length}</span>
+            <span style={{ fontSize:14, color:'#475569', fontWeight:400 }}>{pTxns.length}</span>
           </span>
-          <i className={`fa-solid fa-chevron-${open.txns?'up':'down'}`} style={{ fontSize:12, color:'#475569' }} />
+          <i className={`fa-solid fa-chevron-${open.txns?'up':'down'}`} style={{ color:'#475569' }} />
         </div>
         {open.txns && (
-          <div style={{ paddingBottom:12 }}>
-            {pTxns.length === 0 && <div style={{ color:'#475569', fontSize:13, padding:'8px 0' }}>No transactions yet</div>}
+          <div style={{ paddingBottom:8 }}>
+            {pTxns.length===0 && <div style={{ color:'#475569', fontSize:15, padding:'10px 16px' }}>No transactions yet</div>}
             {pTxns.map(t => (
-              <div key={t.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'11px 0', borderBottom:'1px solid #0f1117' }}>
+              <div key={t.id} style={{ display:'flex', alignItems:'center', gap:12,
+                                       padding:'14px 16px', borderTop:'1px solid #0f1117' }}>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:15, fontWeight:600, color:'#e2e8f0', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.desc}</div>
-                  <div style={{ fontSize:12, color:'#64748b', marginTop:2 }}>{t.date} · {t.cat}</div>
+                  <div style={{ fontSize:17, fontWeight:600, color:'#e2e8f0',
+                                overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.desc}</div>
+                  <div style={{ fontSize:13, color:'#64748b', marginTop:3 }}>{t.date} · {t.cat}</div>
                 </div>
-                <span style={{ fontSize:16, fontWeight:700, color:t.amount<0?'#34d399':'#fbbf24', flexShrink:0 }}>
+                <span style={{ fontSize:18, fontWeight:800, flexShrink:0,
+                               color:t.amount<0?'#34d399':'#fbbf24' }}>
                   {t.amount<0?'+':''}{fmt(Math.abs(t.amount))}
                 </span>
               </div>
             ))}
-            {pTxns.length > 0 && (
-              <div style={{ paddingTop:10, textAlign:'right', fontSize:13, color:'#475569' }}>
-                Total: <span style={{ color:'#fbbf24', fontWeight:700 }}>{fmtS(pTxns.reduce((s,t)=>s+t.amount,0))}</span>
+            {pTxns.length>0 && (
+              <div style={{ display:'flex', justifyContent:'space-between', padding:'12px 16px',
+                            borderTop:'1px solid #0f1117', fontSize:14, color:'#475569' }}>
+                <span>Total</span>
+                <span style={{ color:'#fbbf24', fontWeight:700, fontSize:16 }}>
+                  {fmtS(pTxns.reduce((s,t)=>s+t.amount,0))}
+                </span>
               </div>
             )}
           </div>
