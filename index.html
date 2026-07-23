@@ -115,6 +115,59 @@ button:focus-visible { outline: 2px solid rgba(59,130,246,0.5); outline-offset: 
   .acct-table td { display: block; padding: 2px 6px; font-size: 12px; }
   .acct-table td:first-child { font-weight: 600; width: 100%; color: #e2e8f0; }
 }
+
+/* ── Mobile readability improvements ──────────────────────────────────────── */
+@media (max-width: 640px) {
+
+  /* ── Stat cards: bigger values and labels ── */
+  .stat-row .int-card { padding: 12px 14px !important; }
+  .stat-row .int-card > div:nth-child(2) { font-size: 22px !important; }
+
+  /* ── Nav tab touch targets ── */
+  nav.main-nav button { min-height: 44px !important; padding: 10px 11px !important; }
+
+  /* ── All interactive buttons: min 44px tall ── */
+  .mob-btn-lg { min-height: 44px !important; padding: 10px 14px !important; font-size: 14px !important; }
+
+  /* ── Period balance box: larger text ── */
+  .bal-row { font-size: 13px !important; padding: 3px 0 !important; }
+  .bal-row span { font-size: 13px !important; }
+  .bal-estimate-note { display: none !important; } /* hide "(after all bills & budgets)" sub-note */
+  .bal-remaining-val { font-size: 20px !important; }
+  .bal-estimated-val { font-size: 14px !important; }
+
+  /* ── Bill rows in period card ── */
+  .bill-row { padding: 8px 0 !important; }
+  .bill-row span { font-size: 13px !important; }
+  .bill-badge { font-size: 10px !important; padding: 2px 5px !important; }
+
+  /* ── Transaction rows: larger, more breathing room ── */
+  .txn-row { padding: 10px 0 !important; }
+  .txn-date { font-size: 12px !important; min-width: 72px !important; }
+  .txn-desc { font-size: 14px !important; }
+  .txn-cat  { font-size: 11px !important; padding: 3px 8px !important; }
+  .txn-amt  { font-size: 14px !important; font-weight: 700 !important; min-width: 68px !important; }
+  .txn-comment { font-size: 12px !important; padding-left: 0 !important; padding-top: 3px !important; color: #94a3b8 !important; }
+
+  /* ── Income source names in period card ── */
+  .inc-src-name { font-size: 13px !important; }
+
+  /* ── Period card section labels (Income / Bills) ── */
+  .period-section-lbl { font-size: 12px !important; margin-bottom: 8px !important; }
+
+  /* ── Confirm dialog: larger buttons ── */
+  .confirm-btn { min-height: 44px !important; padding: 10px 20px !important; font-size: 14px !important; }
+
+  /* ── Category budget cards: larger text ── */
+  .cat-card-name { font-size: 14px !important; font-weight: 700 !important; }
+  .cat-card-stat { font-size: 12px !important; }
+
+  /* ── Sinking fund card ── */
+  .fund-balance { font-size: 22px !important; }
+
+  /* ── Debt card stats ── */
+  .debt-balance { font-size: 22px !important; }
+}
 </style>
 </head>
 <body>
@@ -241,10 +294,10 @@ function useConfirm() {
     <div style={{ position:'fixed', inset:0, zIndex:999, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(0,0,0,0.6)' }}
       onClick={cancel}>
       <div onClick={e=>e.stopPropagation()} style={{ background:'#1e293b', borderRadius:14, padding:'24px 28px', maxWidth:360, width:'90%', boxShadow:'0 20px 60px rgba(0,0,0,0.5)' }}>
-        <div style={{ marginBottom:16, fontSize:14, color:'#e2e8f0', lineHeight:1.5 }}>{state.message}</div>
+        <div style={{ marginBottom:18, fontSize:15, color:'#e2e8f0', lineHeight:1.6 }}>{state.message}</div>
         <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
-          <button onClick={cancel} style={{ padding:'7px 16px', borderRadius:8, border:'none', background:'#334155', color:'#94a3b8', cursor:'pointer', fontSize:13 }}>Cancel</button>
-          <button onClick={confirm} style={{ padding:'7px 16px', borderRadius:8, border:'none', background:'#dc2626', color:'#fff', cursor:'pointer', fontWeight:600, fontSize:13 }}>Delete</button>
+          <button onClick={cancel} className="confirm-btn" style={{ padding:'7px 16px', borderRadius:8, border:'none', background:'#334155', color:'#94a3b8', cursor:'pointer', fontSize:13 }}>Cancel</button>
+          <button onClick={confirm} className="confirm-btn" style={{ padding:'7px 16px', borderRadius:8, border:'none', background:'#dc2626', color:'#fff', cursor:'pointer', fontWeight:600, fontSize:13 }}>Delete</button>
         </div>
       </div>
     </div>
@@ -529,7 +582,7 @@ const ACCENT = {
 function DelBtn({ onDelete, title }) {
   return (
     <button onClick={onDelete} title={title||'Delete'}
-      style={{ ...S.btn, padding:'5px 9px', color:'#f87171', background:'transparent', minWidth:32, minHeight:32, display:'flex', alignItems:'center', justifyContent:'center' }}>
+      style={{ ...S.btn, padding:'8px 10px', color:'#f87171', background:'transparent', minWidth:40, minHeight:40, display:'flex', alignItems:'center', justifyContent:'center' }}>
       <i className="fa-solid fa-trash-can" style={{ fontSize:12 }} />
     </button>
   );
@@ -1458,44 +1511,44 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
 
               {/* Balance box */}
               <div style={{ background:'#0f1117', borderRadius:8, padding:'10px 12px', marginBottom:12 }}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:5 }}>
-                  <span style={{ fontSize:11, color:'#475569' }}>Starting balance</span>
-                  <span style={{ fontSize:13, fontWeight:600, color:'#94a3b8' }}>{fmt(pp.totalInc)}</span>
+                <div className="bal-row" style={{ display:'flex', justifyContent:'space-between', marginBottom:5, fontSize:11, color:'#475569' }}>
+                  <span>Starting balance</span>
+                  <span style={{ fontWeight:600, color:'#94a3b8' }}>{fmt(pp.totalInc)}</span>
                 </div>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4, fontSize:11, color:'#475569' }}>
+                <div className="bal-row" style={{ display:'flex', justifyContent:'space-between', marginBottom:4, fontSize:11, color:'#475569' }}>
                   <span>Tithing</span><span style={{ color:'#fbbf24' }}>−{fmt(pp.tithe)}</span>
                 </div>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4, fontSize:11, color:'#475569' }}>
+                <div className="bal-row" style={{ display:'flex', justifyContent:'space-between', marginBottom:4, fontSize:11, color:'#475569' }}>
                   <span>Paid bills</span><span style={{ color:'#f87171' }}>−{fmt(pp.paidBillAmt)}</span>
                 </div>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4, fontSize:11, color:'#475569' }}>
+                <div className="bal-row" style={{ display:'flex', justifyContent:'space-between', marginBottom:4, fontSize:11, color:'#475569' }}>
                   <span>Transactions</span><span style={{ color:'#fbbf24' }}>−{fmt(pp.txnSpent)}</span>
                 </div>
                 {pp.fundContrib > 0 && (
-                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4, fontSize:11, color:'#475569' }}>
+                  <div className="bal-row" style={{ display:'flex', justifyContent:'space-between', marginBottom:4, fontSize:11, color:'#475569' }}>
                     <span>Sinking funds</span><span style={{ color:'#a78bfa' }}>−{fmt(pp.fundContrib)}</span>
                   </div>
                 )}
                 <ProgressBar pct={usedPct} color={barColor} />
                 <div style={{ display:'flex', justifyContent:'space-between', marginTop:6 }}>
                   <span style={{ fontSize:12, fontWeight:600 }}>Remaining</span>
-                  <span style={{ fontSize:17, fontWeight:700, color:pp.remaining>=0?'#34d399':'#f87171' }}>{fmtS(pp.remaining)}</span>
+                  <span className="bal-remaining-val" style={{ fontSize:17, fontWeight:700, color:pp.remaining>=0?'#34d399':'#f87171' }}>{fmtS(pp.remaining)}</span>
                 </div>
                 <div style={{ display:'flex', justifyContent:'space-between', marginTop:4, paddingTop:4, borderTop:'1px solid #1e293b' }}>
-                  <span style={{ fontSize:11, color:'#64748b' }}>Estimated <span style={{ color:'#334155' }}>(after all bills & budgets)</span></span>
-                  <span style={{ fontSize:13, fontWeight:600, color:pp.estimated>=0?'#60a5fa':'#f87171' }}>{fmtS(pp.estimated)}</span>
+                  <span style={{ fontSize:11, color:'#64748b' }}>Estimated<span className="bal-estimate-note" style={{ color:'#334155' }}> (after all bills & budgets)</span></span>
+                  <span className="bal-estimated-val" style={{ fontSize:13, fontWeight:600, color:pp.estimated>=0?'#60a5fa':'#f87171' }}>{fmtS(pp.estimated)}</span>
                 </div>
                 {pp.unpaidAmt > 0 && (
-                  <div style={{ marginTop:5, fontSize:11, color:'#fbbf24' }}>⚠ {fmt(pp.unpaidAmt)} in unpaid bills pending</div>
+                  <div className="bal-row" style={{ marginTop:5, fontSize:11, color:'#fbbf24' }}>⚠ {fmt(pp.unpaidAmt)} in unpaid bills pending</div>
                 )}
               </div>
 
               {/* Income */}
               <div style={{ marginBottom:12 }}>
-                <div style={{ fontSize:11, color:'#475569', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:6 }}>Income</div>
+                <div className="period-section-lbl" style={{ fontSize:11, color:'#475569', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:6 }}>Income</div>
                 {pp.sourceAmts.map(src => (
                   <div key={src.id} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:5 }}>
-                    <span style={{ fontSize:11, color:'#94a3b8', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{src.name}</span>
+                    <span className="inc-src-name" style={{ fontSize:11, color:'#94a3b8', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{src.name}</span>
                     <input type="number" step="0.01" value={src.periodAmt} onChange={e=>setSourceAmt(i, src.id, e.target.value)}
                       style={{ ...S.input, width:110, textAlign:'right', fontSize:12, padding:'4px 8px' }} />
                   </div>
@@ -1513,7 +1566,7 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
 
               {/* Bills */}
               <div>
-                <div style={{ fontSize:11, color:'#475569', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:5 }}>Bills</div>
+                <div className="period-section-lbl" style={{ fontSize:11, color:'#475569', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:5 }}>Bills</div>
                 {pp.pBills.length===0 && <div style={{ fontSize:12, color:'#334155', padding:'6px 0' }}>No bills this period</div>}
                 {[...pp.pBills].sort((a,b)=>(a.dueDay||0)-(b.dueDay||0)).map(b=>{
                   const isOverridden = billPeriodOverrides[b.id] !== undefined;
@@ -1522,13 +1575,14 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
                   <div key={b.id} draggable
                     onDragStart={()=>setDragBillId(b.id)}
                     onDragEnd={()=>{ setDragBillId(null); setDropTarget(null); }}
+                    className="bill-row"
                     style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 0', borderBottom:'1px solid #0f1117', opacity:isDragging?0.4:1, cursor:'grab' }}>
                     <span style={{ fontSize:13, color:'#334155', flexShrink:0, cursor:'grab' }}>⠿</span>
-                    <input type="checkbox" checked={!!paid[b.id]} onChange={()=>toggleBillPaid(b.id)} style={{ cursor:'pointer' }} />
-                    <span style={{ flex:1, fontSize:12, color:paid[b.id]?'#475569':'#e2e8f0', textDecoration:paid[b.id]?'line-through':'none', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                      {b.name}{b.dueDay&&<span style={{ color:'#64748b', fontSize:10, marginLeft:4 }}>({ordinal(b.dueDay)})</span>}
-                      {b.type==='estimated'&&<span style={{ fontSize:9, color:'#fb923c', marginLeft:4, background:'#1c1917', padding:'1px 4px', borderRadius:4 }}>est</span>}
-                      {isOverridden&&<span style={{ fontSize:9, color:'#60a5fa', marginLeft:4, background:'#0f172a', padding:'1px 4px', borderRadius:4 }}>moved</span>}
+                    <input type="checkbox" checked={!!paid[b.id]} onChange={()=>toggleBillPaid(b.id)} style={{ cursor:'pointer', width:20, height:20 }} />
+                    <span className="bill-row" style={{ flex:1, fontSize:13, color:paid[b.id]?'#475569':'#e2e8f0', textDecoration:paid[b.id]?'line-through':'none', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {b.name}{b.dueDay&&<span style={{ color:'#94a3b8', fontSize:11, marginLeft:4 }}>({ordinal(b.dueDay)})</span>}
+                      {b.type==='estimated'&&<span className="bill-badge" style={{ fontSize:9, color:'#fb923c', marginLeft:4, background:'#1c1917', padding:'1px 4px', borderRadius:4 }}>est</span>}
+                      {isOverridden&&<span className="bill-badge" style={{ fontSize:9, color:'#60a5fa', marginLeft:4, background:'#0f172a', padding:'1px 4px', borderRadius:4 }}>moved</span>}
                     </span>
                     {b.linkedDebtId&&<span style={{ fontSize:10, color:'#a78bfa' }}>⟳</span>}
                     {/* Move-to selector: works via tap on mobile (replaces drag-only UX) */}
@@ -1644,7 +1698,7 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
                 return (
                   <div key={cat} style={{ background:'#0f1117', borderRadius:8, padding:12, border: isRunningHot ? '1px solid #7c2d12' : '1px solid transparent' }}>
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
-                      <span style={{ fontSize:13, fontWeight:600 }}>{cat}
+                      <span className="cat-card-name" style={{ fontSize:13, fontWeight:600 }}>{cat}
                         {isRunningHot && <span title={`Spending ${Math.round(velocity*100)}% of pace — ${Math.round(pct)}% spent with ${Math.round(dayPct)}% of period elapsed`} style={{ marginLeft:6, fontSize:10, color:'#fb923c', cursor:'default' }}>🔥</span>}
                       </span>
                       <button onClick={()=>removePCat(safeTab,cat)} title="Remove from this period" style={{ ...S.btn, padding:'4px 7px', color:'#475569', background:'transparent' }}><i className="fa-solid fa-xmark" style={{ fontSize:11 }} /></button>
@@ -1658,7 +1712,7 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
                       {dayPct !== null && <div style={{ position:'absolute', left:0, top:0, width:`${Math.min(100,dayPct)}%`, height:'100%', background:'#334155', borderRadius:4 }} />}
                       <div style={{ position:'absolute', left:0, top:0, width:`${Math.min(100,pct)}%`, height:'100%', background:color, borderRadius:4, transition:'width 0.4s ease' }} />
                     </div>
-                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, marginTop:5, color:'#94a3b8' }}>
+                    <div className="cat-card-stat" style={{ display:'flex', justifyContent:'space-between', fontSize:11, marginTop:5, color:'#94a3b8' }}>
                       <span>Spent: <span style={{ color }}>{fmt(s)}</span></span>
                       <span>Left: <span style={{ color:limit-s>=0?'#34d399':'#f87171' }}>{fmtS(limit-s)}</span></span>
                     </div>
@@ -1947,22 +2001,22 @@ function TransactionLog({ mo, updMo, periods, numPeriods, cats, months, focusPer
           </div>
         );
         return (
-          <div key={t.id} style={{ ...S.row, flexDirection:'column', alignItems:'stretch', gap:0, background: selected.has(t.id)?'#1e2d3d':'transparent', borderRadius:6, marginBottom:1 }}>
+          <div key={t.id} className="txn-row" style={{ ...S.row, flexDirection:'column', alignItems:'stretch', gap:0, background: selected.has(t.id)?'#1e2d3d':'transparent', borderRadius:6, marginBottom:1 }}>
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <input type="checkbox" checked={selected.has(t.id)} onChange={()=>toggleSelect(t.id)} style={{ width:14, height:14, flexShrink:0 }} />
-              <span style={{ color:'#475569', fontSize:11, minWidth:76 }}>{t.date}</span>
-              <span style={{ flex:1, fontSize:13 }}>
+              <input type="checkbox" checked={selected.has(t.id)} onChange={()=>toggleSelect(t.id)} style={{ width:18, height:18, flexShrink:0 }} />
+              <span className="txn-date" style={{ color:'#64748b', fontSize:11, minWidth:76 }}>{t.date}</span>
+              <span className="txn-desc" style={{ flex:1, fontSize:13, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                 {t.desc}
                 {t.recurring && t.recurring!=='none' && <i className="fa-solid fa-rotate" title={`Recurring: ${t.recurring}`} style={{ fontSize:9, color:'#60a5fa', marginLeft:5 }} />}
               </span>
-              <span style={{ fontSize:10, padding:'2px 7px', borderRadius:10, background:'#0f1117', color:'#94a3b8', whiteSpace:'nowrap' }}>{t.cat}</span>
-              <span style={{ fontWeight:600, color: t.amount < 0 ? '#34d399' : '#fbbf24', minWidth:72, textAlign:'right' }}>
+              <span className="txn-cat" style={{ fontSize:10, padding:'2px 7px', borderRadius:10, background:'#0f1117', color:'#94a3b8', whiteSpace:'nowrap', flexShrink:0 }}>{t.cat}</span>
+              <span className="txn-amt" style={{ fontWeight:600, color: t.amount < 0 ? '#34d399' : '#fbbf24', minWidth:72, textAlign:'right', flexShrink:0 }}>
                 {t.amount < 0 ? <><i className="fa-solid fa-arrow-down" style={{ fontSize:9, marginRight:3 }} />{fmt(t.amount)}</> : fmt(t.amount)}
               </span>
-              <button onClick={()=>startEdit(t)} style={{ ...S.btn, padding:'2px 7px', color:'#60a5fa', background:'transparent', fontSize:12 }}>Edit</button>
+              <button onClick={()=>startEdit(t)} style={{ ...S.btn, padding:'5px 9px', color:'#60a5fa', background:'transparent', fontSize:12, flexShrink:0 }}>Edit</button>
               <DelBtn onDelete={()=>del(t.id)} title="Delete transaction" />
             </div>
-            {t.comment && <div style={{ fontSize:11, color:'#64748b', paddingLeft:100, paddingBottom:2 }}>↳ {t.comment}</div>}
+            {t.comment && <div className="txn-comment" style={{ fontSize:11, color:'#64748b', paddingLeft:26, paddingTop:2, paddingBottom:2 }}>↳ {t.comment}</div>}
           </div>
         );
       })}
@@ -2205,7 +2259,7 @@ function FundCard({ fund, onAdjust, onSetContrib, onUpdate, onRemove }) {
         </div>
       </div>
       <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-        <span style={{ fontWeight:700, fontSize:18, color }}>{fmt(fund.balance)}</span>
+        <span className="fund-balance" style={{ fontWeight:700, fontSize:18, color }}>{fmt(fund.balance)}</span>
         {fund.goal>0&&<span style={{ color:'#475569', fontSize:12 }}>{pct.toFixed(0)}% of {fmt(fund.goal)}</span>}
       </div>
       {fund.goal>0&&<><ProgressBar pct={pct} color={color} /><div style={{ fontSize:11, color:'#475569', marginTop:4, marginBottom:8 }}>{fmt(Math.max(0,fund.goal-fund.balance))} remaining</div></>}
@@ -2415,7 +2469,7 @@ function DebtCard({ debt, ym, onRecord, onUndo, onUpdate, onRemove }) {
 
       {/* Stats */}
       <div className="stat-row" style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:14 }}>
-        <div style={{ flex:'1 1 100px' }}><div style={S.lbl}>Balance</div><div style={{ fontWeight:700, color:'#f87171', fontSize:20 }}>{fmt(debt.balance)}</div></div>
+        <div style={{ flex:'1 1 100px' }}><div style={S.lbl}>Balance</div><div className="debt-balance" style={{ fontWeight:700, color:'#f87171', fontSize:20 }}>{fmt(debt.balance)}</div></div>
         <div style={{ flex:'1 1 90px' }}><div style={S.lbl}>Monthly Pmt</div><div style={{ fontWeight:600, color:'#fbbf24', fontSize:15 }}>{fmt(debt.monthlyPmt)}</div></div>
         {monthlyRate > 0 && <div style={{ flex:'1 1 80px' }}><div style={S.lbl}>Interest/mo</div><div style={{ fontWeight:600, color:'#fb923c', fontSize:13 }}>{fmt(monthlyInterest)}</div></div>}
         {monthsLeft&&<div style={{ flex:'1 1 90px' }}><div style={S.lbl}>Est. Payoff</div><div style={{ fontWeight:600, fontSize:13 }}>{monthsLeft} mo · {payoffDate}</div></div>}
