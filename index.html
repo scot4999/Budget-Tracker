@@ -59,6 +59,117 @@ button:focus-visible { outline: 2px solid rgba(59,130,246,0.5); outline-offset: 
 /* Focus-mode period card accent */
 .period-focus-card { border-left: 3px solid #3b82f6 !important; }
 
+/* ── PWA-only swiper (display-mode: standalone = installed app only) ─────── */
+@media (display-mode: standalone) {
+  /* Swiper outer container */
+  .pwa-swiper-wrap {
+    position: relative;
+    overflow: hidden;
+    touch-action: pan-y;
+  }
+  /* Track that holds all period cards side by side */
+  .pwa-swiper-track {
+    display: flex;
+    transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform;
+  }
+  /* Each individual period card */
+  .pwa-period-card {
+    flex: 0 0 100%;
+    width: 100%;
+    min-height: 0;
+  }
+  /* Dot indicators */
+  .pwa-dots {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 0 4px;
+  }
+  .pwa-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #334155;
+    transition: background 0.2s, transform 0.2s;
+  }
+  .pwa-dot.active {
+    background: #3b82f6;
+    transform: scale(1.3);
+  }
+  /* Floating add button */
+  .pwa-fab {
+    position: fixed;
+    bottom: 28px;
+    right: 22px;
+    width: 60px; height: 60px;
+    border-radius: 50%;
+    background: #3b82f6;
+    color: #fff;
+    font-size: 28px;
+    border: none;
+    box-shadow: 0 6px 24px rgba(59,130,246,0.5);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    z-index: 200;
+    transition: transform 0.15s, background 0.15s;
+  }
+  .pwa-fab:active { transform: scale(0.93); background: #2563eb; }
+  /* Bottom sheet */
+  .pwa-sheet-bg {
+    position: fixed; inset: 0; z-index: 300;
+    background: rgba(0,0,0,0.55);
+    display: flex; align-items: flex-end;
+    animation: fadeInBg 0.2s ease;
+  }
+  @keyframes fadeInBg { from { opacity:0; } to { opacity:1; } }
+  .pwa-sheet {
+    width: 100%;
+    background: #1e293b;
+    border-radius: 20px 20px 0 0;
+    padding: 20px 18px 36px;
+    animation: slideUp 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .pwa-sheet-handle {
+    width: 40px; height: 4px;
+    background: #334155;
+    border-radius: 2px;
+    margin: 0 auto 18px;
+  }
+  /* Bill rows in swiper — larger touch targets */
+  .pwa-bill-row {
+    display: flex; align-items: center;
+    gap: 12px;
+    padding: 13px 0;
+    border-bottom: 1px solid #1e293b;
+    cursor: pointer;
+  }
+  .pwa-bill-check {
+    width: 26px; height: 26px;
+    border-radius: 6px;
+    border: 2px solid #334155;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .pwa-bill-check.checked {
+    background: #3b82f6;
+    border-color: #3b82f6;
+  }
+  /* Accordion section */
+  .pwa-accordion-hdr {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 0; cursor: pointer;
+    border-top: 1px solid #1e293b;
+    user-select: none;
+  }
+  /* Category progress rows */
+  .pwa-cat-row {
+    padding: 10px 0;
+    border-bottom: 1px solid #0f1117;
+  }
+}
+
 /* ── Mobile responsive ─────────────────────────────────────────────────────── */
 
 /* Nav: icon-only on phones, show labels on larger screens */
@@ -183,6 +294,20 @@ function useIsMobile() {
     return () => window.removeEventListener('resize', fn);
   }, []);
   return mobile;
+}
+
+function useIsPWA() {
+  const [pwa, setPwa] = useState(() =>
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(display-mode: standalone)');
+    const fn = e => setPwa(e.matches);
+    mq.addEventListener ? mq.addEventListener('change', fn) : mq.addListener(fn);
+    return () => mq.removeEventListener ? mq.removeEventListener('change', fn) : mq.removeListener(fn);
+  }, []);
+  return pwa;
 }
 
 // ── Firebase helpers ──────────────────────────────────────────────────────────
@@ -1291,11 +1416,340 @@ function Overview({ bills, setBills, income, setIncome, debts, sched, setSched, 
   );
 }
 
+// ── PWA Mobile Period Swiper ──────────────────────────────────────────────────
+// Only rendered when running as an installed PWA (display-mode: standalone).
+// Presents each pay period as a full-width swipeable card.
+function MobilePeriodSwiper({
+  mo, updMo, bills, income, ym, toggleBillPaid, periods,
+  effectiveIncomes, numPeriods, funds, setFunds, cats, months,
+  perPeriod, paid, periodBudgets, spentByPeriod, catNames,
+  effectiveBillAmt, effectiveBillPeriod, setBillOverride, clearBillOverride,
+  billPeriodOverrides, setSourceAmt, setRollover, setPBudget, hasPeriods,
+}) {
+  const [activePeriod, setActivePeriod] = useState(0);
+  const [dragX,  setDragX]  = useState(0);   // live drag offset px
+  const [dragging, setDragging] = useState(false);
+  const startXRef = useRef(0);
+  const trackRef  = useRef(null);
+
+  // Accordion open state per section per period
+  const [open, setOpen] = useState({ bills:true, cats:false, txns:false });
+  const toggleOpen = key => setOpen(p => ({ ...p, [key]: !p[key] }));
+
+  // Quick-add sheet state
+  const [showSheet, setShowSheet] = useState(false);
+  const defaultCat = catNames[0] || 'Food';
+  const [qform, setQform] = useState({ date:today(), desc:'', cat:defaultCat, amount:'' });
+  const [qerr, setQerr] = useState({});
+  const addQuick = () => {
+    const errs = {};
+    if (!qform.desc.trim()) errs.desc = 'Required';
+    if (!qform.amount || isNaN(parseFloat(qform.amount))) errs.amount = 'Required';
+    if (Object.keys(errs).length) { setQerr(errs); return; }
+    updMo(m=>({...m, txns:[{...qform, amount:parseFloat(qform.amount), id:uid(), periodIdx:activePeriod, recurring:'none'}, ...(m.txns||[])]}));
+    setQform({ date:today(), desc:'', cat:defaultCat, amount:'' });
+    setQerr({});
+    setShowSheet(false);
+  };
+  const suggestions = React.useMemo(() => buildSuggestions(months||{}), [months]);
+
+  // Touch swipe handlers
+  const onTouchStart = e => {
+    startXRef.current = e.touches[0].clientX;
+    setDragging(true);
+    setDragX(0);
+  };
+  const onTouchMove = e => {
+    if (!dragging) return;
+    const dx = e.touches[0].clientX - startXRef.current;
+    // Resist at edges
+    const atStart = activePeriod === 0 && dx > 0;
+    const atEnd   = activePeriod === numPeriods - 1 && dx < 0;
+    setDragX(atStart || atEnd ? dx * 0.25 : dx);
+  };
+  const onTouchEnd = () => {
+    setDragging(false);
+    const threshold = 60;
+    if (dragX < -threshold && activePeriod < numPeriods - 1) setActivePeriod(p => p + 1);
+    else if (dragX > threshold && activePeriod > 0) setActivePeriod(p => p - 1);
+    setDragX(0);
+  };
+
+  const translateX = -(activePeriod * 100) + (dragX / (trackRef.current?.offsetWidth || 390)) * 100;
+
+  const pp = perPeriod[activePeriod];
+  const p  = periods[activePeriod];
+  const usedPct = pp.totalInc > 0 ? Math.min(100, (pp.used/pp.totalInc)*100) : 0;
+  const pBills = [...pp.pBills].sort((a,b)=>(a.dueDay||0)-(b.dueDay||0));
+  const pBudgets = periodBudgets[activePeriod] || {};
+  const pTxns = (mo.txns||[]).filter(t=>(t.periodIdx??0)===activePeriod).sort((a,b)=>b.date.localeCompare(a.date));
+  const pSpent = spentByPeriod[activePeriod] || {};
+
+  // Velocity for current period
+  const todayD = new Date();
+  let dayPct = null;
+  if (p) {
+    const end = new Date(p.payDate.getTime() + 13*86400000);
+    if (todayD >= p.payDate && todayD <= end) dayPct = (todayD - p.payDate) / (end - p.payDate) * 100;
+    else if (todayD > end) dayPct = 100;
+  }
+
+  return (
+    <div style={{ position:'relative' }}>
+      {/* Month header */}
+      <div style={{ textAlign:'center', marginBottom:12 }}>
+        <div style={{ fontSize:13, color:'#64748b', marginBottom:2 }}>{p ? p.dateLabel : `Period ${activePeriod+1}`}</div>
+        <div style={{ fontSize:12, color:'#475569' }}>
+          {pp.unpaidAmt > 0 && <span style={{ color:'#fbbf24' }}>⚠ {fmt(pp.unpaidAmt)} in unpaid bills</span>}
+        </div>
+      </div>
+
+      {/* Swiper */}
+      <div ref={trackRef} className="pwa-swiper-wrap"
+        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+        <div className="pwa-swiper-track"
+          style={{ transform:`translateX(${translateX}%)`, transition: dragging ? 'none' : undefined }}>
+          {Array.from({length:numPeriods}, (_,pi) => {
+            const ppi = perPeriod[pi];
+            const pp_p = periods[pi];
+            return (
+              <div key={pi} className="pwa-period-card">
+                {/* Big balance card */}
+                <div style={{ background:'#1e293b', borderRadius:16, padding:'22px 20px', marginBottom:12 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:18 }}>
+                    <div>
+                      <div style={{ fontSize:12, color:'#475569', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>Remaining</div>
+                      <div style={{ fontSize:42, fontWeight:800, color:ppi.remaining>=0?'#34d399':'#f87171', lineHeight:1 }}>
+                        {fmtS(ppi.remaining)}
+                      </div>
+                    </div>
+                    <div style={{ textAlign:'right' }}>
+                      <div style={{ fontSize:12, color:'#475569', marginBottom:4 }}>Started with</div>
+                      <div style={{ fontSize:18, fontWeight:700, color:'#94a3b8' }}>{fmt(ppi.totalInc)}</div>
+                    </div>
+                  </div>
+                  {/* Progress bar */}
+                  <div style={{ height:10, background:'#0f1117', borderRadius:5, overflow:'hidden', marginBottom:12 }}>
+                    <div style={{ width:`${usedPct}%`, height:'100%', background:ppi.remaining>=0?'#3b82f6':'#f87171', borderRadius:5, transition:'width 0.4s' }} />
+                  </div>
+                  {/* 3 key numbers */}
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+                    <div style={{ background:'#0f1117', borderRadius:10, padding:'10px 8px', textAlign:'center' }}>
+                      <div style={{ fontSize:11, color:'#475569', marginBottom:4 }}>Bills</div>
+                      <div style={{ fontSize:16, fontWeight:700, color:'#f87171' }}>{fmt(ppi.paidBillAmt)}</div>
+                      <div style={{ fontSize:10, color:'#334155' }}>of {fmt(ppi.billsTotal - ppi.tithe)}</div>
+                    </div>
+                    <div style={{ background:'#0f1117', borderRadius:10, padding:'10px 8px', textAlign:'center' }}>
+                      <div style={{ fontSize:11, color:'#475569', marginBottom:4 }}>Spent</div>
+                      <div style={{ fontSize:16, fontWeight:700, color:'#fbbf24' }}>{fmt(ppi.txnSpent)}</div>
+                      <div style={{ fontSize:10, color:'#334155' }}>{pTxns.length} txn{pTxns.length!==1?'s':''}</div>
+                    </div>
+                    <div style={{ background:'#0f1117', borderRadius:10, padding:'10px 8px', textAlign:'center' }}>
+                      <div style={{ fontSize:11, color:'#475569', marginBottom:4 }}>Estimated</div>
+                      <div style={{ fontSize:16, fontWeight:700, color:ppi.estimated>=0?'#60a5fa':'#f87171' }}>{fmtS(ppi.estimated)}</div>
+                      <div style={{ fontSize:10, color:'#334155' }}>after all</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Dot indicators */}
+      {numPeriods > 1 && (
+        <div className="pwa-dots">
+          {Array.from({length:numPeriods}, (_,pi) => (
+            <div key={pi} className={`pwa-dot${pi===activePeriod?' active':''}`}
+              onClick={()=>setActivePeriod(pi)} style={{ cursor:'pointer' }} />
+          ))}
+        </div>
+      )}
+
+      {/* Bills accordion */}
+      <div style={{ background:'#1e293b', borderRadius:14, padding:'0 16px', marginBottom:10 }}>
+        <div className="pwa-accordion-hdr" onClick={()=>toggleOpen('bills')}>
+          <span style={{ fontSize:15, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:8 }}>
+            <i className="fa-solid fa-receipt" style={{ color:ACCENT.bills, fontSize:14 }} />
+            Bills
+            <span style={{ fontSize:12, color: pp.unpaidAmt>0?'#fbbf24':'#34d399', fontWeight:400, marginLeft:4 }}>
+              {pBills.filter(b=>paid[b.id]).length}/{pBills.length} paid
+            </span>
+          </span>
+          <i className={`fa-solid fa-chevron-${open.bills?'up':'down'}`} style={{ fontSize:12, color:'#475569' }} />
+        </div>
+        {open.bills && (
+          <div style={{ paddingBottom:12 }}>
+            {pBills.length === 0 && <div style={{ color:'#475569', fontSize:13, padding:'8px 0' }}>No bills this period</div>}
+            {pBills.map(b => (
+              <div key={b.id} className="pwa-bill-row" onClick={()=>toggleBillPaid(b.id)}>
+                <div className={`pwa-bill-check${paid[b.id]?' checked':''}`}>
+                  {paid[b.id] && <i className="fa-solid fa-check" style={{ fontSize:13, color:'#fff' }} />}
+                </div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:15, fontWeight:600, color:paid[b.id]?'#475569':'#e2e8f0', textDecoration:paid[b.id]?'line-through':'none', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {b.name}
+                  </div>
+                  {b.dueDay && <div style={{ fontSize:12, color:'#64748b', marginTop:2 }}>Due {ordinal(b.dueDay)}</div>}
+                </div>
+                <div style={{ fontSize:16, fontWeight:700, color:paid[b.id]?'#475569':'#e2e8f0', flexShrink:0 }}>
+                  {fmt(effectiveBillAmt(b))}
+                </div>
+              </div>
+            ))}
+            <div style={{ display:'flex', justifyContent:'space-between', paddingTop:10, fontSize:13, color:'#475569' }}>
+              <span>Bills total</span>
+              <span style={{ color:'#f87171', fontWeight:700 }}>{fmt(pp.billsTotal - pp.tithe)}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Categories accordion */}
+      {Object.keys(pBudgets).length > 0 && (
+        <div style={{ background:'#1e293b', borderRadius:14, padding:'0 16px', marginBottom:10 }}>
+          <div className="pwa-accordion-hdr" onClick={()=>toggleOpen('cats')}>
+            <span style={{ fontSize:15, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:8 }}>
+              <i className="fa-solid fa-sliders" style={{ color:ACCENT.budget, fontSize:14 }} />
+              Budgets
+            </span>
+            <i className={`fa-solid fa-chevron-${open.cats?'up':'down'}`} style={{ fontSize:12, color:'#475569' }} />
+          </div>
+          {open.cats && (
+            <div style={{ paddingBottom:12 }}>
+              {Object.entries(pBudgets).map(([cat, limit]) => {
+                const spent = pSpent[cat]||0;
+                const pct = limit > 0 ? (spent/limit)*100 : 0;
+                const velocity = dayPct !== null && limit > 0 ? pct/(dayPct||1) : null;
+                const hot = velocity !== null && velocity > 1.25 && pct < 100;
+                const color = pct>90?'#f87171':pct>70?'#fbbf24':'#34d399';
+                return (
+                  <div key={cat} className="pwa-cat-row">
+                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                      <span style={{ fontSize:15, fontWeight:600, color:'#e2e8f0' }}>{cat}{hot&&' 🔥'}</span>
+                      <span style={{ fontSize:14, color, fontWeight:700 }}>{fmt(spent)} <span style={{ color:'#475569', fontWeight:400 }}>/ {fmt(limit)}</span></span>
+                    </div>
+                    <div style={{ position:'relative', height:8, background:'#0f1117', borderRadius:4, overflow:'hidden' }}>
+                      {dayPct!==null && <div style={{ position:'absolute', left:0, top:0, width:`${Math.min(100,dayPct)}%`, height:'100%', background:'#334155', borderRadius:4 }} />}
+                      <div style={{ position:'absolute', left:0, top:0, width:`${Math.min(100,pct)}%`, height:'100%', background:color, borderRadius:4, transition:'width 0.4s' }} />
+                    </div>
+                    <div style={{ fontSize:12, color:'#475569', marginTop:4, textAlign:'right' }}>
+                      {fmt(Math.max(0,limit-spent))} left
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Transactions accordion */}
+      <div style={{ background:'#1e293b', borderRadius:14, padding:'0 16px', marginBottom:80 }}>
+        <div className="pwa-accordion-hdr" onClick={()=>toggleOpen('txns')}>
+          <span style={{ fontSize:15, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:8 }}>
+            <i className="fa-solid fa-list-ul" style={{ color:ACCENT.budget, fontSize:14 }} />
+            Transactions
+            <span style={{ fontSize:12, color:'#475569', fontWeight:400 }}>{pTxns.length}</span>
+          </span>
+          <i className={`fa-solid fa-chevron-${open.txns?'up':'down'}`} style={{ fontSize:12, color:'#475569' }} />
+        </div>
+        {open.txns && (
+          <div style={{ paddingBottom:12 }}>
+            {pTxns.length === 0 && <div style={{ color:'#475569', fontSize:13, padding:'8px 0' }}>No transactions yet</div>}
+            {pTxns.map(t => (
+              <div key={t.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'11px 0', borderBottom:'1px solid #0f1117' }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:15, fontWeight:600, color:'#e2e8f0', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.desc}</div>
+                  <div style={{ fontSize:12, color:'#64748b', marginTop:2 }}>{t.date} · {t.cat}</div>
+                </div>
+                <span style={{ fontSize:16, fontWeight:700, color:t.amount<0?'#34d399':'#fbbf24', flexShrink:0 }}>
+                  {t.amount<0?'+':''}{fmt(Math.abs(t.amount))}
+                </span>
+              </div>
+            ))}
+            {pTxns.length > 0 && (
+              <div style={{ paddingTop:10, textAlign:'right', fontSize:13, color:'#475569' }}>
+                Total: <span style={{ color:'#fbbf24', fontWeight:700 }}>{fmtS(pTxns.reduce((s,t)=>s+t.amount,0))}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Floating Add button */}
+      <button className="pwa-fab" onClick={()=>{ setShowSheet(true); setQerr({}); }}>
+        <i className="fa-solid fa-plus" />
+      </button>
+
+      {/* Quick-add bottom sheet */}
+      {showSheet && (
+        <div className="pwa-sheet-bg" onClick={e=>{ if(e.target===e.currentTarget) setShowSheet(false); }}>
+          <div className="pwa-sheet">
+            <div className="pwa-sheet-handle" />
+            <div style={{ fontSize:17, fontWeight:700, color:'#e2e8f0', marginBottom:18 }}>Add Transaction · P{activePeriod+1}</div>
+            <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+              <div>
+                <label style={S.lbl}>Date</label>
+                <input type="date" value={qform.date} onChange={e=>setQform(f=>({...f,date:e.target.value}))}
+                  style={{ ...S.input, fontSize:16, padding:'12px 14px' }} />
+              </div>
+              <div>
+                <label style={S.lbl}>Description</label>
+                <input type="text" placeholder="Merchant / note" value={qform.desc}
+                  onChange={e=>{ setQform(f=>({...f,desc:e.target.value})); setQerr(p=>({...p,desc:null})); }}
+                  style={{ ...S.input, fontSize:16, padding:'12px 14px', ...(qerr.desc?{borderColor:'#ef4444'}:{}) }} />
+                {qerr.desc && <div className="field-error-msg">{qerr.desc}</div>}
+                {/* Suggestions */}
+                {qform.desc.trim().length > 0 && (() => {
+                  const sugg = suggestions.filter(s=>s.desc.toLowerCase().includes(qform.desc.toLowerCase().trim())).slice(0,4);
+                  return sugg.length > 0 ? (
+                    <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginTop:8 }}>
+                      {sugg.map((s,i)=>(
+                        <button key={i} onMouseDown={()=>setQform(f=>({...f,desc:s.desc,cat:catNames.includes(s.cat)?s.cat:f.cat,amount:s.lastAmount?String(s.lastAmount):f.amount}))}
+                          style={{ ...S.btn, fontSize:12, padding:'5px 10px', color:'#93c5fd', background:'#1e3a5f' }}>
+                          {s.desc}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null;
+                })()}
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                <div>
+                  <label style={S.lbl}>Category</label>
+                  <select value={qform.cat} onChange={e=>setQform(f=>({...f,cat:e.target.value}))}
+                    style={{ ...S.input, fontSize:16, padding:'12px 14px' }}>
+                    {catNames.map(c=><option key={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={S.lbl}>Amount <span style={{ color:'#334155' }}>(− ok)</span></label>
+                  <input type="number" step="0.01" placeholder="0.00" value={qform.amount}
+                    onChange={e=>{ setQform(f=>({...f,amount:e.target.value})); setQerr(p=>({...p,amount:null})); }}
+                    style={{ ...S.input, fontSize:16, padding:'12px 14px', ...(qerr.amount?{borderColor:'#ef4444'}:{}) }} />
+                  {qerr.amount && <div className="field-error-msg">{qerr.amount}</div>}
+                </div>
+              </div>
+              <button onClick={addQuick}
+                style={{ ...S.btn, background:'#3b82f6', color:'#fff', fontWeight:700, fontSize:17, padding:'15px', borderRadius:12, width:'100%', marginTop:4 }}>
+                Add Transaction
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Month Budget ──────────────────────────────────────────────────────────────
 // viewMode: 'split' = side-by-side columns (original)
 //           'focus:0', 'focus:1', 'focus:2' = single period, full width
 //           'all' = all periods stacked full-width (good for mobile)
 function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, effectiveIncomes, numPeriods, funds, setFunds, cats, months }) {
+  const isPWA = useIsPWA();
   const [viewMode, setViewMode] = useState(() => {
     try { return localStorage.getItem('bgt_view_mode') || 'split'; } catch { return 'split'; }
   });
@@ -1409,6 +1863,25 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
   const gridCols = (viewMode === 'split')
     ? `repeat(${numPeriods}, minmax(300px,1fr))`
     : '1fr';
+
+  // ── PWA: render the simplified swiper instead ──────────────────────────────
+  if (isPWA) {
+    return (
+      <MobilePeriodSwiper
+        mo={mo} updMo={updMo} bills={bills} income={income} ym={ym}
+        toggleBillPaid={toggleBillPaid} periods={periods}
+        effectiveIncomes={effectiveIncomes} numPeriods={numPeriods}
+        funds={funds} setFunds={setFunds} cats={cats} months={months}
+        perPeriod={perPeriod} paid={paid} periodBudgets={periodBudgets}
+        spentByPeriod={spentByPeriod} catNames={catNames}
+        effectiveBillAmt={effectiveBillAmt} effectiveBillPeriod={effectiveBillPeriod}
+        setBillOverride={setBillOverride} clearBillOverride={clearBillOverride}
+        billPeriodOverrides={billPeriodOverrides}
+        setSourceAmt={setSourceAmt} setRollover={setRollover}
+        setPBudget={setPBudget} hasPeriods={hasPeriods}
+      />
+    );
+  }
 
   return (
     <div>
