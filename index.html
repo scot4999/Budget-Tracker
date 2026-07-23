@@ -59,6 +59,35 @@ button:focus-visible { outline: 2px solid rgba(59,130,246,0.5); outline-offset: 
 /* Focus-mode period card accent */
 .period-focus-card { border-left: 3px solid #3b82f6 !important; }
 
+/* ── PWA standalone: full-screen layout ──────────────────────────────────── */
+@media (display-mode: standalone) {
+  /* Root wrapper: full width, no side margins */
+  .app-root { max-width: 100% !important; margin: 0 !important; width: 100% !important; }
+  /* Content area: tight padding, full width */
+  .mob-content { padding: 8px 0 80px !important; width: 100% !important; }
+  /* Whole swiper view and root card fills full width */
+  .pwa-view { width: 100% !important; box-sizing: border-box; }
+  /* Swiper and its cards fill 100% width */
+  .pwa-swiper-wrap,
+  .pwa-swiper-track,
+  .pwa-period-card { width: 100% !important; box-sizing: border-box; }
+  /* Balance card inside each period card: side margins become padding */
+  .pwa-period-card > div { margin-left: 12px !important; margin-right: 12px !important; }
+  /* Accordion sections: side padding for content, full width container */
+  .pwa-accordion-hdr { padding-left: 16px !important; padding-right: 16px !important; }
+  .pwa-bill-row { padding-left: 16px !important; padding-right: 16px !important; }
+  .pwa-cat-row { padding-left: 16px !important; padding-right: 16px !important; }
+  /* Safe area insets for notched phones (iPhone X+) */
+  .app-sticky-hdr { padding-top: max(0px, env(safe-area-inset-top)) !important; }
+  .pwa-fab {
+    bottom: max(28px, calc(16px + env(safe-area-inset-bottom)));
+    right: max(22px, calc(16px + env(safe-area-inset-right)));
+  }
+  .pwa-sheet {
+    padding-bottom: max(36px, calc(16px + env(safe-area-inset-bottom)));
+  }
+}
+
 /* ── PWA-only swiper (display-mode: standalone = installed app only) ─────── */
 @media (display-mode: standalone) {
   /* Swiper outer container */
@@ -886,10 +915,10 @@ function BudgetApp({ user }) {
   const TABS = TAB_GROUPS.flat();
 
   return (
-    <div style={{ maxWidth:1020, margin:'0 auto' }}>
+    <div className="app-root" style={{ maxWidth:1020, margin:'0 auto' }}>
       {remoteEditToast && <div className="toast"><i className="fa-solid fa-user-pen" style={{ marginRight:6 }} />{remoteEditToast}</div>}
       {/* Sticky header + nav */}
-      <div style={{ position:'sticky', top:0, zIndex:50, background:'#0f1117', borderBottom:'1px solid #1e293b' }}>
+      <div className="app-sticky-hdr" style={{ position:'sticky', top:0, zIndex:50, background:'#0f1117', borderBottom:'1px solid #1e293b' }}>
         <div style={{ padding: isMobile ? '8px 12px 0' : '12px 16px 0' }}>
           {/* Header row */}
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8, gap:8, minWidth:0 }}>
@@ -1495,9 +1524,9 @@ function MobilePeriodSwiper({
   }
 
   return (
-    <div style={{ position:'relative' }}>
+    <div className="pwa-view" style={{ position:'relative', width:'100%' }}>
       {/* Month header */}
-      <div style={{ textAlign:'center', marginBottom:12 }}>
+      <div style={{ textAlign:'center', marginBottom:12, padding:'0 16px' }}>
         <div style={{ fontSize:13, color:'#64748b', marginBottom:2 }}>{p ? p.dateLabel : `Period ${activePeriod+1}`}</div>
         <div style={{ fontSize:12, color:'#475569' }}>
           {pp.unpaidAmt > 0 && <span style={{ color:'#fbbf24' }}>⚠ {fmt(pp.unpaidAmt)} in unpaid bills</span>}
