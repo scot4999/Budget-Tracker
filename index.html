@@ -66,6 +66,58 @@ button:focus-visible { outline: 2px solid rgba(59,130,246,0.5); outline-offset: 
 /* Focus-mode period card accent */
 .period-focus-card { border-left: 3px solid #3b82f6 !important; }
 
+/* ── Web (non-PWA) density pass: bigger text, less dead space ──────────────
+   Scoped to .ov-tab (Overview) and .mb-tab (Month Budget) only.
+   display-mode:browser matches normal desktop/mobile browser tabs — it does
+   NOT match the installed PWA (display-mode:standalone), so the phone app
+   is completely unaffected by anything in this block. ─────────────────────── */
+@media (display-mode: browser) {
+
+  /* Stat cards: bigger numbers, tighter card padding */
+  .ov-tab .stat-row, .mb-tab .stat-row { gap: 8px !important; margin-bottom: 14px !important; }
+  .ov-tab .int-card, .mb-tab .int-card { padding: 11px 13px !important; }
+  .ov-tab .int-card > div:nth-child(2), .mb-tab .int-card > div:nth-child(2) { font-size: 24px !important; }
+
+  /* Section cards (Overview collapsible cards): tighter outer spacing */
+  .ov-tab .cc-card { padding: 14px 16px !important; margin-bottom: 8px !important; }
+  .ov-tab .cc-header { margin-bottom: 10px !important; }
+  .ov-tab .cc-title { font-size: 16px !important; }
+  .ov-tab .cc-body table.resp-table { font-size: 14px !important; }
+  .ov-tab .cc-body th { font-size: 12px !important; padding: 5px 8px !important; }
+  .ov-tab .cc-body td { font-size: 14px !important; padding: 9px 8px !important; }
+  .ov-tab .cc-body label { font-size: 12px !important; }
+  .ov-tab .cc-body p { font-size: 13px !important; }
+
+  /* Month Budget: shrink the view-toggle/tally card padding, bump its text */
+  .mb-tab > div:first-child { padding: 9px 14px !important; }
+
+  /* Period cards: tighter padding, bigger balance figures */
+  .mb-tab .period-grid > div { padding: 14px !important; }
+  .mb-tab .period-grid h3 { font-size: 15px !important; }
+  .mb-tab .bal-row { font-size: 13px !important; margin-bottom: 3px !important; }
+  .mb-tab .bal-remaining-val { font-size: 22px !important; }
+  .mb-tab .bal-estimated-val { font-size: 15px !important; }
+  .mb-tab .bal-estimate-note { display: none !important; }
+  .mb-tab .period-section-lbl { font-size: 12px !important; margin-bottom: 5px !important; }
+  .mb-tab .inc-src-name { font-size: 13px !important; }
+  .mb-tab .bill-row { font-size: 14px !important; padding: 7px 0 !important; }
+
+  /* Category budget cards: bigger name/stats, tighter card padding */
+  .mb-tab .cat-card-name { font-size: 15px !important; }
+  .mb-tab .cat-card-stat { font-size: 12px !important; }
+
+  /* Transactions: bigger rows, less vertical padding waste */
+  .mb-tab .txn-row { padding: 8px 0 !important; }
+  .mb-tab .txn-date { font-size: 12px !important; }
+  .mb-tab .txn-desc { font-size: 15px !important; }
+  .mb-tab .txn-cat  { font-size: 11px !important; }
+  .mb-tab .txn-amt  { font-size: 15px !important; }
+  .mb-tab .txn-comment { font-size: 12px !important; }
+
+  /* Category Budgets card + Transactions card: tighter outer padding */
+  .mb-tab .mb-card { padding: 14px !important; }
+}
+
 /* ── PWA standalone: full-screen layout ──────────────────────────────────── */
 @media (display-mode: standalone) {
   /* Root wrapper: full width, no side margins */
@@ -1007,6 +1059,7 @@ function BudgetApp({ user }) {
 function CollapsibleCard({ id, icon, title, accent, collapsed, onToggle, onDragStart, onDragOver, onDrop, onDragEnd, isDragOver, headerRight, children }) {
   return (
     <div
+      className="cc-card"
       draggable
       onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; onDragStart(id); }}
       onDragOver={e => { e.preventDefault(); onDragOver(id); }}
@@ -1015,7 +1068,7 @@ function CollapsibleCard({ id, icon, title, accent, collapsed, onToggle, onDragS
       style={{ ...S.card, outline: isDragOver ? '2px dashed #3b82f6' : '2px solid transparent', transition:'outline 0.1s, opacity 0.15s', cursor:'default', marginBottom:10 }}
     >
       {/* Header row — drag handle + collapse toggle + section header + right controls */}
-      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom: collapsed ? 0 : 14 }}>
+      <div className="cc-header" style={{ display:'flex', alignItems:'center', gap:6, marginBottom: collapsed ? 0 : 14 }}>
         {/* Drag handle */}
         <span title="Drag to reorder" style={{ color:'#334155', cursor:'grab', fontSize:15, flexShrink:0, padding:'2px 4px', marginRight:2, lineHeight:1 }}>⠿</span>
         {/* Collapse toggle */}
@@ -1023,7 +1076,7 @@ function CollapsibleCard({ id, icon, title, accent, collapsed, onToggle, onDragS
           <i className={`fa-solid fa-chevron-${collapsed ? 'right' : 'down'}`} style={{ fontSize:10 }} />
         </button>
         {/* Title — clicking also toggles */}
-        <h3 onClick={onToggle} style={{ fontSize:14, fontWeight:700, color:accent||ACCENT.general, display:'flex', alignItems:'center', gap:7, flex:1, cursor:'pointer', userSelect:'none' }}>
+        <h3 className="cc-title" onClick={onToggle} style={{ fontSize:14, fontWeight:700, color:accent||ACCENT.general, display:'flex', alignItems:'center', gap:7, flex:1, cursor:'pointer', userSelect:'none' }}>
           <span style={{ width:3, height:16, background:accent||ACCENT.general, borderRadius:2, display:'inline-block', flexShrink:0 }} />
           <i className={`fa-solid ${icon}`} style={{ fontSize:13 }} />
           {title}
@@ -1032,7 +1085,7 @@ function CollapsibleCard({ id, icon, title, accent, collapsed, onToggle, onDragS
         {!collapsed && headerRight}
       </div>
       {/* Body */}
-      {!collapsed && children}
+      {!collapsed && <div className="cc-body">{children}</div>}
     </div>
   );
 }
@@ -1419,7 +1472,7 @@ function Overview({ bills, setBills, income, setIncome, debts, sched, setSched, 
   };
 
   return (
-    <div>
+    <div className="ov-tab">
       {ConfirmDialog}
       <div className="stat-row" style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:18 }}>
         <StatCard label="Monthly Income"   value={fmt(totalMonthlyIncome)}      color={ACCENT.income}  sub="est." icon="fa-arrow-trend-up" />
@@ -1943,7 +1996,7 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
   }
 
   return (
-    <div>
+    <div className="mb-tab">
       {/* View mode toggle + zero-budget tally */}
       <div style={{ background:'#1e293b', borderRadius:12, padding:'11px 16px', marginBottom:14 }}>
         {/* Toggle bar — horizontally scrollable on mobile */}
@@ -2164,7 +2217,7 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
       </div>
 
       {/* Category Budgets — per period */}
-      <div style={S.card}>
+      <div className="mb-card" style={S.card}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
           <SectionHeader icon="fa-sliders" title="Category Budgets" accent={ACCENT.budget} />
           <div style={{ display:'flex', gap:6, alignItems:'center' }}>
@@ -2358,7 +2411,7 @@ function TransactionLog({ mo, updMo, periods, numPeriods, cats, months, focusPer
   }, [months, txns, activePeriod]);
 
   return (
-    <div style={S.card}>
+    <div className="mb-card" style={S.card}>
       {/* Header with period tabs */}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10, flexWrap:'wrap', gap:8 }}>
         <SectionHeader icon="fa-list-ul" title="Transactions" accent={ACCENT.budget} />
