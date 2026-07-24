@@ -1044,8 +1044,8 @@ function BudgetApp({ user }) {
         {tab==='overview'      && <Overview bills={bills} setBills={setBills} income={income} setIncome={setIncome} debts={debts} sched={sched} setSched={setSched} funds={funds} months={months} cats={cats} setCats={setCats} overviewLayout={overviewLayout} setOverviewLayout={setOverviewLayout} />}
         {tab==='month budget'  && <MonthBudget mo={mo} updMo={updMo} bills={bills} income={income} ym={ym} toggleBillPaid={toggleBillPaid} periods={periods} effectiveIncomes={effectiveIncomes} numPeriods={numPeriods} funds={funds} setFunds={setFunds} cats={cats} months={months} />}
         {tab==='sinking funds' && <SinkingFunds funds={funds} setFunds={setFunds} />}
-        {tab==='debts'         && <Debts debts={debts} setDebts={setDebts} ym={ym} />}
-        {tab==='accounts'      && <Accounts accounts={accounts} setAccounts={setAccounts} debts={debts} />}
+        {tab==='debts'         && <Debts debts={debts} setDebts={setDebts} ym={ym} income={income} />}
+        {tab==='accounts'      && <Accounts accounts={accounts} setAccounts={setAccounts} debts={debts} bills={bills} />}
         {tab==='summary'       && <SummaryDashboard months={months} bills={bills} />}
         {tab==='calendar'      && <CalendarTab income={income} bills={bills} sched={sched} />}
       </div>
@@ -2923,11 +2923,18 @@ function amortizeTimeline(startBal, monthlyRate, payment, pmtMap, firstYm, maxRo
   return rows;
 }
 
-function Debts({ debts, setDebts, ym }) {
+function Debts({ debts, setDebts, ym, income }) {
   const [nd, setNd] = useState({ name:'', balance:'', monthlyPmt:'', apr:'' });
   const [errors, setErrors] = useState({});
   const totalDebt = debts.reduce((s,d)=>s+d.balance,0);
   const totalPmt  = debts.reduce((s,d)=>s+d.monthlyPmt,0);
+
+  // Debt-to-income ratio: total monthly debt payments / total monthly income.
+  // Lender convention bands: <36% healthy, 36-43% caution, >43% high risk.
+  const totalMonthlyIncome = (income||[]).reduce((s,i)=>s+freqMonthly(i.frequency,i.amount),0);
+  const dti = totalMonthlyIncome > 0 ? (totalPmt / totalMonthlyIncome) * 100 : null;
+  const dtiColor = dti === null ? '#94a3b8' : dti < 36 ? '#34d399' : dti <= 43 ? '#fbbf24' : '#f87171';
+  const dtiLabel = dti === null ? '—' : dti < 36 ? 'Healthy' : dti <= 43 ? 'Caution' : 'High risk';
 
   const recordManual = (id,amt) => setDebts(prev=>prev.map(d=>d.id!==id?d:{
     ...d, balance:Math.max(0,d.balance-amt),
@@ -2961,6 +2968,7 @@ function Debts({ debts, setDebts, ym }) {
         <StatCard label="Total Debt"       value={fmt(totalDebt)}      color={ACCENT.bills}  icon="fa-credit-card" />
         <StatCard label="Monthly Payments" value={fmt(totalPmt)+'/mo'} color={ACCENT.debts}  icon="fa-money-bill-transfer" />
         <StatCard label="Est. Payoff"      value={estMonths ? estMonths+' mo' : '—'} color="#94a3b8" icon="fa-flag-checkered" />
+        <StatCard label="Debt-to-Income"   value={dti===null?'—':dti.toFixed(1)+'%'} color={dtiColor} sub={dti===null?'set income to calculate':dtiLabel} icon="fa-scale-unbalanced" />
       </div>
       <div style={S.card}>
         <SectionHeader icon="fa-circle-plus" title="Add Debt" accent={ACCENT.debts} />
@@ -3449,12 +3457,20 @@ function SummaryDashboard({ months, bills }) {
 // ── Accounts / Net Worth ─────────────────────────────────────────────────────
 const ACCOUNT_TYPES = ['Checking','Savings','Investment','Cash','Other'];
 
-function Accounts({ accounts, setAccounts, debts }) {
+function Accounts({ accounts, setAccounts, debts, bills }) {
   const [showAdd, setShowAdd] = useState(false);
   const [newAcc, setNewAcc] = useState({ name:'', type:'Checking', balance:'' });
   const [editId, setEditId] = useState(null);
   const [editAcc, setEditAcc] = useState({});
   const [snapshotYm, setSnapshotYm] = useState(curYM());
+
+  // Emergency fund coverage: liquid (Checking + Savings) balance / average monthly bills.
+  // Classic guidance is 3-6 months of expenses held in cash.
+  const liquidBalance = accounts.filter(a=>a.type==='Checking'||a.type==='Savings').reduce((s,a)=>s+a.balance,0);
+  const avgMonthlyBills = (bills||[]).reduce((s,b)=>s+b.amount,0);
+  const monthsCovered = avgMonthlyBills > 0 ? liquidBalance / avgMonthlyBills : null;
+  const efColor = monthsCovered === null ? '#94a3b8' : monthsCovered >= 6 ? '#34d399' : monthsCovered >= 3 ? '#fbbf24' : '#f87171';
+  const efLabel = monthsCovered === null ? 'add bills to calculate' : monthsCovered >= 6 ? 'Fully funded' : monthsCovered >= 3 ? 'Building' : 'Underfunded';
 
   const addAccount = () => {
     if (!newAcc.name) return;
@@ -3494,6 +3510,7 @@ function Accounts({ accounts, setAccounts, debts }) {
         <StatCard label="Total Assets"  value={fmt(totalAssets)}       color="#34d399" icon="fa-building-columns" />
         <StatCard label="Total Debt"    value={fmt(totalDebt)}         color="#f87171" icon="fa-credit-card" />
         <StatCard label="Net Worth"     value={fmtS(netWorth)}         color={netWorth>=0?'#60a5fa':'#f87171'} icon="fa-scale-balanced" />
+        <StatCard label="Emergency Fund" value={monthsCovered===null?'—':monthsCovered.toFixed(1)+' mo'} color={efColor} sub={efLabel} icon="fa-shield-heart" />
       </div>
 
       {/* Account list */}

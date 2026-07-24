@@ -1,7 +1,7 @@
 // Budget Tracker Service Worker
 // Caches the app shell for offline use. Firebase data syncs when online.
 
-const CACHE = 'budget-v5';
+const CACHE = 'budget-v6';
 const SHELL = [
   '/',
   '/index.html',
