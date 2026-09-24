@@ -1509,7 +1509,7 @@ function Overview({ bills, setBills, income, setIncome, debts, sched, setSched, 
 // Only rendered when running as an installed PWA (display-mode: standalone).
 // Presents each pay period as a full-width swipeable card.
 function MobilePeriodSwiper({
-  mo, updMo, bills, income, ym, toggleBillPaid, periods,
+  mo, updMo, bills, income, ym, toggleBillPaid, toggleTithePaid, periods,
   effectiveIncomes, numPeriods, funds, setFunds, cats, months,
   perPeriod, paid, periodBudgets, spentByPeriod, catNames,
   effectiveBillAmt, effectiveBillPeriod, setBillOverride, clearBillOverride,
@@ -1522,7 +1522,7 @@ function MobilePeriodSwiper({
   const trackRef  = useRef(null);
 
   // Accordion open state per section per period
-  const [open, setOpen] = useState({ bills:true, cats:false, txns:false });
+  const [open, setOpen] = useState({ tithe:true, bills:true, cats:false, txns:false });
   const toggleOpen = key => setOpen(p => ({ ...p, [key]: !p[key] }));
 
   // Quick-add sheet state
@@ -1629,7 +1629,7 @@ function MobilePeriodSwiper({
                   </div>
                   {ppi.unpaidAmt > 0 && (
                     <div style={{ fontSize:13, color:'#fbbf24', marginTop:6 }}>
-                      ⚠ {fmt(ppi.unpaidAmt)} in unpaid bills
+                      ⚠ {fmt(ppi.unpaidAmt)} in unpaid bills & tithing
                     </div>
                   )}
                 </div>
@@ -1660,13 +1660,62 @@ function MobilePeriodSwiper({
         </div>
       </div>
 
+      {/* ── Tithing ── */}
+      <div style={SEC}>
+        <div style={HDR} onClick={()=>toggleOpen('tithe')}>
+          <span style={{ fontSize:17, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:10 }}>
+            <i className="fa-solid fa-church" style={{ color:ACCENT.tithe }} />
+            Tithing
+            <span style={{ fontSize:14, color:pp.titheItems.some(t=>!paid[t.paidKey])?'#fbbf24':'#34d399', fontWeight:500 }}>
+              {pp.titheItems.filter(t=>paid[t.paidKey]).length}/{pp.titheItems.length} paid
+            </span>
+          </span>
+          <i className={`fa-solid fa-chevron-${open.tithe?'up':'down'}`} style={{ color:'#475569' }} />
+        </div>
+        {open.tithe && (
+          <div style={{ paddingBottom:8 }}>
+            {pp.titheItems.map(t => (
+              <div key={t.id} onClick={()=>toggleTithePaid(t.paidKey)}
+                style={{ display:'flex', alignItems:'center', gap:14, padding:'14px 16px',
+                         borderTop:'1px solid #0f1117', cursor:'pointer',
+                         background: paid[t.paidKey] ? '#0f1117' : 'transparent' }}>
+                {/* Custom checkbox */}
+                <div style={{ width:28, height:28, borderRadius:8, flexShrink:0, display:'flex',
+                              alignItems:'center', justifyContent:'center',
+                              background: paid[t.paidKey]?'#3b82f6':'transparent',
+                              border: paid[t.paidKey]?'2px solid #3b82f6':'2px solid #334155',
+                              transition:'all 0.15s' }}>
+                  {paid[t.paidKey] && <i className="fa-solid fa-check" style={{ fontSize:14, color:'#fff' }} />}
+                </div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:17, fontWeight:600,
+                                color:paid[t.paidKey]?'#475569':'#e2e8f0',
+                                textDecoration:paid[t.paidKey]?'line-through':'none',
+                                overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {t.name} <span style={{ fontSize:13, color:'#64748b', fontWeight:400 }}>(10%)</span>
+                  </div>
+                </div>
+                <div style={{ fontSize:18, fontWeight:700, color:paid[t.paidKey]?'#334155':'#e2e8f0', flexShrink:0 }}>
+                  {fmt(t.amount)}
+                </div>
+              </div>
+            ))}
+            <div style={{ display:'flex', justifyContent:'space-between', padding:'12px 16px',
+                          borderTop:'1px solid #0f1117', fontSize:14, color:'#475569' }}>
+              <span>Tithing total</span>
+              <span style={{ color:'#fbbf24', fontWeight:700, fontSize:16 }}>{fmt(pp.tithe)}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* ── Bills ── */}
       <div style={SEC}>
         <div style={HDR} onClick={()=>toggleOpen('bills')}>
           <span style={{ fontSize:17, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:10 }}>
             <i className="fa-solid fa-receipt" style={{ color:ACCENT.bills }} />
             Bills
-            <span style={{ fontSize:14, color:pp.unpaidAmt>0?'#fbbf24':'#34d399', fontWeight:500 }}>
+            <span style={{ fontSize:14, color:pBills.some(b=>!paid[b.id])?'#fbbf24':'#34d399', fontWeight:500 }}>
               {pBills.filter(b=>paid[b.id]).length}/{pBills.length} paid
             </span>
           </span>
@@ -1920,7 +1969,14 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
       : income.map(s => ({ ...s, periodAmt: s.amount }));
     const earned   = sourceAmts.reduce((sum, s) => sum + s.periodAmt, 0);
     const rollover = pi.rollover || 0;
-    const tithe    = earned * 0.1;
+
+    // Tithing, broken out per income source and tracked paid/unpaid like a bill
+    const titheItems = sourceAmts.map(s => ({
+      id: s.id, name: s.name, amount: s.periodAmt * 0.1, paidKey: `tithe:${i}:${s.id}`,
+    }));
+    const tithe        = titheItems.reduce((s,t)=>s+t.amount,0);
+    const paidTitheAmt = titheItems.filter(t=>paid[t.paidKey]).reduce((s,t)=>s+t.amount,0);
+
     const totalInc = earned + rollover;
 
     const pBills = bills.filter(b => effectiveBillPeriod(b) === i);
@@ -1934,19 +1990,19 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
     const fundContrib = (funds||[]).reduce((s,f) =>
       s + (f.txns||[]).filter(t=>t.source===fundSource).reduce((a,t)=>a+t.amount,0), 0);
 
-    const used        = tithe + paidBillAmt + txnSpent + fundContrib;
+    const used        = paidTitheAmt + paidBillAmt + txnSpent + fundContrib;
     const remaining   = totalInc - used;
-    const unpaidAmt   = pBills.filter(b=>!paid[b.id]).reduce((s,b)=>s+effectiveBillAmt(b),0);
+    const unpaidAmt   = pBills.filter(b=>!paid[b.id]).reduce((s,b)=>s+effectiveBillAmt(b),0) + (tithe - paidTitheAmt);
 
     // Remaining (unspent) category budget for this period
     const pBudgets = periodBudgets[i] || {};
     const pSpent   = spentByPeriod[i] || {};
     const remainingCatBudget = Object.entries(pBudgets).reduce((s,[cat,limit]) => s + (limit - (pSpent[cat]||0)), 0);
 
-    // Estimated = starting balance minus ALL bills (paid+unpaid), transactions, fund contributions, and unspent category budgets
+    // Estimated = starting balance minus ALL bills & tithing (paid+unpaid), transactions, fund contributions, and unspent category budgets
     const estimated = totalInc - billsTotal - txnSpent - fundContrib - remainingCatBudget;
 
-    return { earned, rollover, tithe, totalInc, pBills, billsTotal, paidBillAmt, txnSpent, fundContrib, used, remaining, unpaidAmt, sourceAmts, remainingCatBudget, estimated };
+    return { earned, rollover, tithe, titheItems, paidTitheAmt, totalInc, pBills, billsTotal, paidBillAmt, txnSpent, fundContrib, used, remaining, unpaidAmt, sourceAmts, remainingCatBudget, estimated };
   });
 
   const totalInc       = perPeriod.reduce((s,p)=>s+p.totalInc,0);
@@ -1964,6 +2020,7 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
     return { ...m, periodIncomes: pi };
   });
   const setRollover = (i,v) => updMo(m => { const pi=[...(m.periodIncomes||[])]; pi[i]={...(pi[i]||{}), rollover:parseFloat(v)||0}; return {...m, periodIncomes:pi}; });
+  const toggleTithePaid = (key) => updMo(m => { const p = { ...(m.paid||{}) }; p[key] = !p[key]; return { ...m, paid: p }; });
   const setPBudget  = (pi,cat,v) => updMo(m=>{ const pb={...(m.periodBudgets||makePeriodBudgets(numPeriods))}; pb[pi]={...(pb[pi]||{}), [cat]:parseFloat(v)||0}; return {...m,periodBudgets:pb}; });
   const removePCat  = (pi,cat) => updMo(m=>{ const pb={...(m.periodBudgets||makePeriodBudgets(numPeriods))}; const p={...(pb[pi]||{})}; delete p[cat]; pb[pi]=p; return {...m,periodBudgets:pb}; });
   const addPCat     = (pi,cat) => updMo(m=>{ const pb={...(m.periodBudgets||makePeriodBudgets(numPeriods))}; pb[pi]={...(pb[pi]||{}), [cat]:0}; return {...m,periodBudgets:pb}; });
@@ -1981,7 +2038,7 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
     return (
       <MobilePeriodSwiper
         mo={mo} updMo={updMo} bills={bills} income={income} ym={ym}
-        toggleBillPaid={toggleBillPaid} periods={periods}
+        toggleBillPaid={toggleBillPaid} toggleTithePaid={toggleTithePaid} periods={periods}
         effectiveIncomes={effectiveIncomes} numPeriods={numPeriods}
         funds={funds} setFunds={setFunds} cats={cats} months={months}
         perPeriod={perPeriod} paid={paid} periodBudgets={periodBudgets}
@@ -2101,7 +2158,7 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
                   <span style={{ fontWeight:600, color:'#94a3b8' }}>{fmt(pp.totalInc)}</span>
                 </div>
                 <div className="bal-row" style={{ display:'flex', justifyContent:'space-between', marginBottom:4, fontSize:11, color:'#475569' }}>
-                  <span>Tithing</span><span style={{ color:'#fbbf24' }}>−{fmt(pp.tithe)}</span>
+                  <span>Paid tithing</span><span style={{ color:'#fbbf24' }}>−{fmt(pp.paidTitheAmt)}</span>
                 </div>
                 <div className="bal-row" style={{ display:'flex', justifyContent:'space-between', marginBottom:4, fontSize:11, color:'#475569' }}>
                   <span>Paid bills</span><span style={{ color:'#f87171' }}>−{fmt(pp.paidBillAmt)}</span>
@@ -2124,7 +2181,7 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
                   <span className="bal-estimated-val" style={{ fontSize:13, fontWeight:600, color:pp.estimated>=0?'#60a5fa':'#f87171' }}>{fmtS(pp.estimated)}</span>
                 </div>
                 {pp.unpaidAmt > 0 && (
-                  <div className="bal-row" style={{ marginTop:5, fontSize:11, color:'#fbbf24' }}>⚠ {fmt(pp.unpaidAmt)} in unpaid bills pending</div>
+                  <div className="bal-row" style={{ marginTop:5, fontSize:11, color:'#fbbf24' }}>⚠ {fmt(pp.unpaidAmt)} in unpaid bills & tithing</div>
                 )}
               </div>
 
@@ -2143,9 +2200,23 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
                   <input type="number" step="0.01" value={pp.rollover} onChange={e=>setRollover(i,e.target.value)}
                     style={{ ...S.input, width:110, textAlign:'right', fontSize:12, padding:'4px 8px' }} />
                 </div>
-                <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'#94a3b8', paddingTop:5, borderTop:'1px solid #0f1117' }}>
-                  <span>Tithing (10%)</span>
-                  <span style={{ color:'#fbbf24' }}>{fmt(pp.tithe)}</span>
+              </div>
+
+              {/* Tithing — per income source, checked off when paid */}
+              <div style={{ marginBottom:12 }}>
+                <div className="period-section-lbl" style={{ fontSize:11, color:'#475569', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:5 }}>Tithing</div>
+                {pp.titheItems.map(t=>(
+                  <div key={t.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 0', borderBottom:'1px solid #0f1117' }}>
+                    <input type="checkbox" checked={!!paid[t.paidKey]} onChange={()=>toggleTithePaid(t.paidKey)} style={{ cursor:'pointer', width:20, height:20 }} />
+                    <span style={{ flex:1, fontSize:13, color:paid[t.paidKey]?'#475569':'#e2e8f0', textDecoration:paid[t.paidKey]?'line-through':'none', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {t.name} <span style={{ color:'#475569', fontSize:11 }}>(10%)</span>
+                    </span>
+                    <span style={{ fontSize:12, color:paid[t.paidKey]?'#475569':'#e2e8f0', whiteSpace:'nowrap' }}>{fmt(t.amount)}</span>
+                  </div>
+                ))}
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, marginTop:6, paddingTop:5, borderTop:'1px solid #0f1117' }}>
+                  <span style={{ color:'#475569' }}>Tithing total</span>
+                  <span style={{ color:'#fbbf24', fontWeight:600 }}>{fmt(pp.tithe)}</span>
                 </div>
               </div>
 
@@ -2198,7 +2269,7 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
                 })}
                 <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, marginTop:6, paddingTop:5, borderTop:'1px solid #0f1117' }}>
                   <span style={{ color:'#475569' }}>Bills total</span>
-                  <span style={{ color:'#f87171', fontWeight:600 }}>{fmt(pp.billsTotal)}</span>
+                  <span style={{ color:'#f87171', fontWeight:600 }}>{fmt(pp.billsTotal - pp.tithe)}</span>
                 </div>
               </div>
 
