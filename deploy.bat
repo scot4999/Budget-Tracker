@@ -8,7 +8,7 @@ echo [1/3] Copying budget.html to public/index.html (Firebase)...
 copy /Y budget.html public\index.html >nul
 
 echo [2/3] Deploying to Firebase Hosting...
-firebase deploy --only hosting
+call firebase deploy --only hosting
 if errorlevel 1 (
   echo ERROR: Firebase deploy failed.
   pause

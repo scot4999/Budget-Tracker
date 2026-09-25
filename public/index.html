@@ -10,11 +10,15 @@
 <meta name="theme-color" content="#0f1117">
 <title>Budget Tracker</title>
 <link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/png" href="/icons/icon-192.png">
 <link rel="apple-touch-icon" href="/icons/icon-192.png">
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -31,7 +35,7 @@
 </script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: #0f1117; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+body { background: #0f1117; color: #e2e8f0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
 input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 input[type=checkbox] { accent-color: #3b82f6; width: 16px; height: 16px; cursor: pointer; flex-shrink: 0; }
 ::-webkit-scrollbar { width: 6px; height: 4px; }
@@ -42,6 +46,15 @@ input[type=checkbox] { accent-color: #3b82f6; width: 16px; height: 16px; cursor:
 input:focus, select:focus, textarea:focus { outline: none; box-shadow: 0 0 0 2px rgba(59,130,246,0.45); border-color: #3b82f6 !important; transition: box-shadow 0.15s; }
 button:focus-visible { outline: 2px solid rgba(59,130,246,0.5); outline-offset: 2px; border-radius: 6px; }
 
+/* buttons: consistent hover/press feedback everywhere */
+button:not(:disabled) { transition: filter 0.12s ease, transform 0.05s ease; }
+button:not(:disabled):hover { filter: brightness(1.18); }
+button:not(:disabled):active { filter: brightness(0.9); transform: scale(0.97); }
+
+/* clickable rows (accordion headers, etc.) that aren't <button> elements */
+.clickable-row { transition: background 0.12s ease; }
+.clickable-row:hover { background: rgba(255,255,255,0.035); }
+
 /* skeleton shimmer */
 @keyframes shimmer { 0% { background-position: -600px 0; } 100% { background-position: 600px 0; } }
 .skeleton { border-radius: 8px; background: linear-gradient(90deg, #1e293b 25%, #263347 50%, #1e293b 75%); background-size: 600px 100%; animation: shimmer 1.6s infinite linear; }
@@ -51,8 +64,8 @@ button:focus-visible { outline: 2px solid rgba(59,130,246,0.5); outline-offset: 
 .fa-spin { animation: spin 0.7s linear infinite; }
 
 /* card hover */
-.int-card { transition: background 0.12s ease; cursor: default; }
-.int-card:hover { background: #243447 !important; }
+.int-card { transition: background 0.12s ease, box-shadow 0.12s ease; cursor: default; box-shadow: 0 1px 2px rgba(0,0,0,0.4), 0 4px 10px rgba(0,0,0,0.22); }
+.int-card:hover { background: #243447 !important; box-shadow: 0 1px 2px rgba(0,0,0,0.45), 0 6px 14px rgba(0,0,0,0.3); }
 
 /* toast notifications */
 @keyframes fadeInUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
@@ -771,7 +784,7 @@ function categoryTotalsForMonth(ym, monthsObj) {
 // ── Shared styles ─────────────────────────────────────────────────────────────
 const S = {
   btn:   { padding:'7px 13px', borderRadius:8, border:'none', cursor:'pointer', background:'#1e293b', color:'#e2e8f0', fontSize:13 },
-  card:  { background:'#1e293b', borderRadius:12, padding:18, marginBottom:14 },
+  card:  { background:'#1e293b', borderRadius:12, padding:18, marginBottom:14, boxShadow:'0 1px 2px rgba(0,0,0,0.4), 0 6px 16px rgba(0,0,0,0.24)' },
   input: { background:'#0f1117', border:'1px solid #334155', borderRadius:8, color:'#e2e8f0', padding:'7px 11px', fontSize:13, width:'100%' },
   lbl:   { color:'#94a3b8', fontSize:11, marginBottom:3, display:'block', textTransform:'uppercase', letterSpacing:'0.05em' },
   row:   { display:'flex', alignItems:'center', gap:10, padding:'9px 0', borderBottom:'1px solid #0f1117' },
@@ -1662,7 +1675,7 @@ function MobilePeriodSwiper({
 
       {/* ── Tithing ── */}
       <div style={SEC}>
-        <div style={HDR} onClick={()=>toggleOpen('tithe')}>
+        <div className="clickable-row" style={HDR} onClick={()=>toggleOpen('tithe')}>
           <span style={{ fontSize:17, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:10 }}>
             <i className="fa-solid fa-church" style={{ color:ACCENT.tithe }} />
             Tithing
@@ -1675,7 +1688,7 @@ function MobilePeriodSwiper({
         {open.tithe && (
           <div style={{ paddingBottom:8 }}>
             {pp.titheItems.map(t => (
-              <div key={t.id} onClick={()=>toggleTithePaid(t.paidKey)}
+              <div key={t.id} className="clickable-row" onClick={()=>toggleTithePaid(t.paidKey)}
                 style={{ display:'flex', alignItems:'center', gap:14, padding:'14px 16px',
                          borderTop:'1px solid #0f1117', cursor:'pointer',
                          background: paid[t.paidKey] ? '#0f1117' : 'transparent' }}>
@@ -1711,7 +1724,7 @@ function MobilePeriodSwiper({
 
       {/* ── Bills ── */}
       <div style={SEC}>
-        <div style={HDR} onClick={()=>toggleOpen('bills')}>
+        <div className="clickable-row" style={HDR} onClick={()=>toggleOpen('bills')}>
           <span style={{ fontSize:17, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:10 }}>
             <i className="fa-solid fa-receipt" style={{ color:ACCENT.bills }} />
             Bills
@@ -1725,7 +1738,7 @@ function MobilePeriodSwiper({
           <div style={{ paddingBottom:8 }}>
             {pBills.length === 0 && <div style={{ color:'#475569', fontSize:15, padding:'10px 16px' }}>No bills this period</div>}
             {pBills.map(b => (
-              <div key={b.id} onClick={()=>toggleBillPaid(b.id)}
+              <div key={b.id} className="clickable-row" onClick={()=>toggleBillPaid(b.id)}
                 style={{ display:'flex', alignItems:'center', gap:14, padding:'14px 16px',
                          borderTop:'1px solid #0f1117', cursor:'pointer',
                          background: paid[b.id] ? '#0f1117' : 'transparent' }}>
@@ -1763,7 +1776,7 @@ function MobilePeriodSwiper({
       {/* ── Category Budgets ── */}
       {Object.keys(pBudgets).length > 0 && (
         <div style={SEC}>
-          <div style={HDR} onClick={()=>toggleOpen('cats')}>
+          <div className="clickable-row" style={HDR} onClick={()=>toggleOpen('cats')}>
             <span style={{ fontSize:17, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:10 }}>
               <i className="fa-solid fa-sliders" style={{ color:ACCENT.budget }} />
               Budgets
@@ -1801,7 +1814,7 @@ function MobilePeriodSwiper({
 
       {/* ── Transactions ── */}
       <div style={{ ...SEC, marginBottom:100 }}>
-        <div style={HDR} onClick={()=>toggleOpen('txns')}>
+        <div className="clickable-row" style={HDR} onClick={()=>toggleOpen('txns')}>
           <span style={{ fontSize:17, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:10 }}>
             <i className="fa-solid fa-list-ul" style={{ color:ACCENT.budget }} />
             Transactions
