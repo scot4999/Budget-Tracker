@@ -1,7 +1,7 @@
 // Budget Tracker Service Worker
 // Caches the app shell for offline use. Firebase data syncs when online.
 
-const CACHE = 'budget-v6';
+const CACHE = 'budget-v7';
 const SHELL = [
   '/',
   '/index.html',
@@ -26,7 +26,7 @@ self.addEventListener('activate', e => {
   );
 });
 
-// Fetch: network-first for Firebase/CDN, cache-first for app shell
+// Fetch: network-first for everything (cache is only an offline fallback)
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
@@ -46,16 +46,19 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Cache-first for same-origin assets (app shell, icons, etc.)
-  if (url.origin === self.location.origin) {
+  // Network-first for same-origin assets so a deploy shows up on the next open;
+  // fall back to the cached copy only when offline.
+  if (url.origin === self.location.origin && e.request.method === 'GET') {
     e.respondWith(
-      caches.match(e.request).then(cached => {
-        const fresh = fetch(e.request).then(res => {
-          if (res.ok) caches.open(CACHE).then(c => c.put(e.request, res.clone()));
+      fetch(e.request)
+        .then(res => {
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then(c => c.put(e.request, copy));
+          }
           return res;
-        });
-        return cached || fresh;
-      })
+        })
+        .catch(() => caches.match(e.request).then(cached => cached || caches.match('/index.html')))
     );
   }
 });
