@@ -670,6 +670,18 @@ function billPeriodIdx(bill, periods) {
   return periods.length - 1;
 }
 
+// Bills may have optional startMonth / endMonth ('YYYY-MM', inclusive). Blank = unbounded.
+function billActiveInMonth(bill, ym) {
+  if (bill.startMonth && ym < bill.startMonth) return false;
+  if (bill.endMonth && ym > bill.endMonth) return false;
+  return true;
+}
+function billStatus(bill, ym) {
+  if (bill.startMonth && ym < bill.startMonth) return 'upcoming';
+  if (bill.endMonth && ym > bill.endMonth) return 'ended';
+  return 'active';
+}
+
 function nextDueDate(dueDay) {
   if (!dueDay) return '—';
   const now = new Date(); const d = new Date(now.getFullYear(), now.getMonth(), dueDay);
@@ -732,7 +744,8 @@ function makeMonth(numPeriods) {
 }
 
 // ── Summary dashboard metric helpers ────────────────────────────────────────────
-function computeMonthMetrics(ym, monthsObj, bills) {
+function computeMonthMetrics(ym, monthsObj, allBills) {
+  const bills = allBills.filter(b => billActiveInMonth(b, ym));
   const raw = monthsObj[ym];
   if (!raw) return { totalIncome:0, totalBillsPlanned:0, totalBillsPaid:0, totalCatBudget:0, totalCatSpent:0, totalTithe:0 };
   const mo = migrateMonth(raw);
@@ -760,7 +773,8 @@ function buildAnnualData(year, monthsObj, bills) {
   return rows;
 }
 
-function billsBreakdownForMonth(ym, monthsObj, bills) {
+function billsBreakdownForMonth(ym, monthsObj, allBills) {
+  const bills = allBills.filter(b => billActiveInMonth(b, ym));
   const raw = monthsObj[ym];
   const mo = raw ? migrateMonth(raw) : { estimatedBillAmounts:{}, paid:{} };
   const estAmts = mo.estimatedBillAmounts || {};
@@ -1111,7 +1125,7 @@ function Overview({ bills, setBills, income, setIncome, debts, sched, setSched, 
   const [editBill,      setEditBill]      = useState({});
   const [editIncId,     setEditIncId]     = useState(null);
   const [editInc,       setEditInc]       = useState({});
-  const [newBill, setNewBill] = useState({ name:'', amount:'', period:'1', dueDay:'', linkedDebtId:'', type:'recurring' });
+  const [newBill, setNewBill] = useState({ name:'', amount:'', period:'1', dueDay:'', linkedDebtId:'', type:'recurring', startMonth:curYM(), endMonth:'' });
   const [newInc,  setNewInc]  = useState({ name:'', amount:'', frequency:'biweekly', day1:1, day2:15 });
   const [showAddCat, setShowAddCat] = useState(false);
   const [newCat,     setNewCat]     = useState({ name:'', amount:'' });
@@ -1160,7 +1174,8 @@ function Overview({ bills, setBills, income, setIncome, debts, sched, setSched, 
   };
 
   const totalMonthlyIncome = income.reduce((s,i)=>s+freqMonthly(i.frequency,i.amount),0);
-  const totalMonthlyBills  = bills.reduce((s,b)=>s+b.amount,0);
+  const activeBills        = bills.filter(b=>billActiveInMonth(b, curYM()));
+  const totalMonthlyBills  = activeBills.reduce((s,b)=>s+b.amount,0);
   const totalMonthlyTithe  = totalMonthlyIncome * 0.1;
   const totalMonthlyCatBudget = (cats||[]).reduce((s,c)=>s+c.amount,0);
   const totalMonthlyFundContrib = (funds||[]).reduce((s,f)=>s+(f.monthlyContribution||0),0);
@@ -1171,10 +1186,11 @@ function Overview({ bills, setBills, income, setIncome, debts, sched, setSched, 
     const errs = {};
     if (!newBill.name.trim()) errs.name = 'Required';
     if (!newBill.amount || isNaN(parseFloat(newBill.amount))) errs.amount = 'Required';
+    if (newBill.startMonth && newBill.endMonth && newBill.endMonth < newBill.startMonth) errs.endMonth = 'Must be after start';
     if (Object.keys(errs).length) { setBillErrors(errs); return; }
     setBillErrors({});
-    setBills(p=>[...p,{id:uid(),name:newBill.name,amount:parseFloat(newBill.amount)||0,period:+newBill.period,dueDay:+newBill.dueDay||null,linkedDebtId:newBill.linkedDebtId||null,type:newBill.type||'recurring'}]);
-    setNewBill({name:'',amount:'',period:'1',dueDay:'',linkedDebtId:'',type:'recurring'});
+    setBills(p=>[...p,{id:uid(),name:newBill.name,amount:parseFloat(newBill.amount)||0,period:+newBill.period,dueDay:+newBill.dueDay||null,linkedDebtId:newBill.linkedDebtId||null,type:newBill.type||'recurring',startMonth:newBill.startMonth||null,endMonth:newBill.endMonth||null}]);
+    setNewBill({name:'',amount:'',period:'1',dueDay:'',linkedDebtId:'',type:'recurring',startMonth:curYM(),endMonth:''});
     setShowAddBill(false);
   };
   const addInc = () => {
@@ -1189,9 +1205,11 @@ function Overview({ bills, setBills, income, setIncome, debts, sched, setSched, 
     setNewInc({name:'',amount:'',frequency:'biweekly',day1:1,day2:15});
     setShowAddIncome(false);
   };
-  const startEdit = b => { setEditBillId(b.id); setEditBill({...b,dueDay:b.dueDay||'',linkedDebtId:b.linkedDebtId||'',type:b.type||'recurring'}); };
+  const startEdit = b => { setEditBillId(b.id); setBillErrors({}); setEditBill({...b,dueDay:b.dueDay||'',linkedDebtId:b.linkedDebtId||'',type:b.type||'recurring',startMonth:b.startMonth||'',endMonth:b.endMonth||''}); };
   const saveEdit  = () => {
-    setBills(p=>p.map(b=>b.id!==editBillId?b:{...b,name:editBill.name,amount:parseFloat(editBill.amount)||0,period:+editBill.period,dueDay:+editBill.dueDay||null,linkedDebtId:editBill.linkedDebtId||null,type:editBill.type||'recurring'}));
+    if (editBill.startMonth && editBill.endMonth && editBill.endMonth < editBill.startMonth) { setBillErrors({ editRange:'End month must be on or after start month' }); return; }
+    setBillErrors({});
+    setBills(p=>p.map(b=>b.id!==editBillId?b:{...b,name:editBill.name,amount:parseFloat(editBill.amount)||0,period:+editBill.period,dueDay:+editBill.dueDay||null,linkedDebtId:editBill.linkedDebtId||null,type:editBill.type||'recurring',startMonth:editBill.startMonth||null,endMonth:editBill.endMonth||null}));
     setEditBillId(null);
   };
 
@@ -1350,6 +1368,15 @@ function Overview({ bills, setBills, income, setIncome, debts, sched, setSched, 
               </select>
             </div>
             <div>
+              <label style={S.lbl}>Starts (month)</label>
+              <input type="month" style={{ ...S.input, colorScheme:'dark' }} value={newBill.startMonth} onChange={e=>setNewBill(f=>({...f,startMonth:e.target.value}))} />
+            </div>
+            <div>
+              <label style={S.lbl}>Ends (month, optional)</label>
+              <input type="month" style={{ ...S.input, colorScheme:'dark', ...(billErrors.endMonth?{borderColor:'#ef4444'}:{}) }} value={newBill.endMonth} onChange={e=>{ setNewBill(f=>({...f,endMonth:e.target.value})); setBillErrors(p=>({...p,endMonth:null})); }} />
+              {billErrors.endMonth && <div className="field-error-msg">{billErrors.endMonth}</div>}
+            </div>
+            <div>
               <label style={S.lbl}>Links to Debt</label>
               <select style={S.input} value={newBill.linkedDebtId} onChange={e=>setNewBill(f=>({...f,linkedDebtId:e.target.value}))}>
                 <option value="">None</option>
@@ -1364,12 +1391,12 @@ function Overview({ bills, setBills, income, setIncome, debts, sched, setSched, 
         )}
         {bills.length === 0 && <EmptyState icon="fa-receipt" message="No recurring bills yet." action={<PrimaryBtn onClick={()=>setShowAddBill(true)}>+ Add Bill</PrimaryBtn>} />}
         {bills.length > 0 && <table className="resp-table" style={{ width:'100%', borderCollapse:'collapse' }}>
-          <thead><tr>{['Name','Amount','Type','Due Day','Next Due','Linked Debt','Actions'].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <thead><tr>{['Name','Amount','Type','Due Day','Next Due','Linked Debt','Active Months','Actions'].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
           <tbody>
             {[...bills].sort((a,b)=>(a.dueDay||99)-(b.dueDay||99)).map(b => {
               const isEditing = editBillId===b.id;
               return (
-                <tr key={b.id} style={{ borderBottom:'1px solid #0f1117', background:isEditing?'#0f1117':'transparent' }}>
+                <tr key={b.id} style={{ borderBottom:'1px solid #0f1117', background:isEditing?'#0f1117':'transparent', opacity:(!isEditing && billStatus(b,curYM())!=='active')?0.55:1 }}>
                   {isEditing ? (
                     <>
                       <td style={S.td}><input style={{ ...S.input, padding:'4px 8px', fontSize:12 }} value={editBill.name} onChange={e=>setEditBill(f=>({...f,name:e.target.value}))} /></td>
@@ -1387,6 +1414,13 @@ function Overview({ bills, setBills, income, setIncome, debts, sched, setSched, 
                           <option value="">None</option>
                           {debts.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
                         </select>
+                      </td>
+                      <td style={S.td}>
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <input type="month" title="Starts (blank = always)" style={{ ...S.input, padding:'4px 8px', fontSize:12, colorScheme:'dark' }} value={editBill.startMonth||''} onChange={e=>setEditBill(f=>({...f,startMonth:e.target.value}))} />
+                          <input type="month" title="Ends (blank = ongoing)" style={{ ...S.input, padding:'4px 8px', fontSize:12, colorScheme:'dark', ...(billErrors.editRange?{borderColor:'#ef4444'}:{}) }} value={editBill.endMonth||''} onChange={e=>{ setEditBill(f=>({...f,endMonth:e.target.value})); setBillErrors(p=>({...p,editRange:null})); }} />
+                          {billErrors.editRange && <div className="field-error-msg">{billErrors.editRange}</div>}
+                        </div>
                       </td>
                       <td style={{ ...S.td, whiteSpace:'nowrap' }}>
                         <PrimaryBtn onClick={saveEdit} style={{ padding:'4px 10px', fontSize:12, marginRight:4 }}>Save</PrimaryBtn>
@@ -1407,6 +1441,21 @@ function Overview({ bills, setBills, income, setIncome, debts, sched, setSched, 
                       <td style={{ ...S.td, color:b.linkedDebtId?'#a78bfa':'#475569', fontSize:12 }}>
                         {b.linkedDebtId ? (debts.find(d=>d.id===b.linkedDebtId)?.name||b.linkedDebtId) : '—'}
                       </td>
+                      <td style={{ ...S.td, fontSize:12, whiteSpace:'nowrap' }}>
+                        {(() => {
+                          const st = billStatus(b, curYM());
+                          const color = st==='active' ? '#34d399' : st==='ended' ? '#f87171' : '#fbbf24';
+                          const label = st==='active' ? 'active' : st==='ended' ? 'ended' : 'upcoming';
+                          const range = (!b.startMonth && !b.endMonth) ? 'Always'
+                            : `${b.startMonth ? monthLabel(b.startMonth) : 'Always'} → ${b.endMonth ? monthLabel(b.endMonth) : 'ongoing'}`;
+                          return (
+                            <>
+                              <span style={{ fontSize:10, padding:'2px 7px', borderRadius:10, border:`1px solid ${color}55`, color, marginRight:6 }}>{label}</span>
+                              <span style={{ color:'#94a3b8' }}>{range}</span>
+                            </>
+                          );
+                        })()}
+                      </td>
                       <td style={{ ...S.td, whiteSpace:'nowrap' }}>
                         <button onClick={()=>startEdit(b)} style={{ ...S.btn, padding:'3px 9px', fontSize:12, color:'#60a5fa', marginRight:4 }}>Edit</button>
                         <DelBtn onDelete={()=>confirmDelete(`Remove bill "${b.name}"?`, ()=>setBills(p=>p.filter(x=>x.id!==b.id)))} title="Delete bill" />
@@ -1419,7 +1468,7 @@ function Overview({ bills, setBills, income, setIncome, debts, sched, setSched, 
           </tbody>
         </table>}
         {bills.length > 0 && <div style={{ marginTop:10, fontSize:12, color:'#475569', textAlign:'right' }}>
-          Total / month: <span style={{ color:'#f87171', fontWeight:600 }}>{fmt(totalMonthlyBills)}</span>
+          Total / month (active now): <span style={{ color:'#f87171', fontWeight:600 }}>{fmt(totalMonthlyBills)}</span>
         </div>}
       </>
     ),
@@ -1992,7 +2041,7 @@ function MonthBudget({ mo, updMo, bills, income, ym, toggleBillPaid, periods, ef
 
     const totalInc = earned + rollover;
 
-    const pBills = bills.filter(b => effectiveBillPeriod(b) === i);
+    const pBills = bills.filter(b => billActiveInMonth(b, ym) && effectiveBillPeriod(b) === i);
 
     const billsTotal  = pBills.reduce((s,b)=>s+effectiveBillAmt(b),0) + tithe;
     const paidBillAmt = pBills.filter(b=>paid[b.id]).reduce((s,b)=>s+effectiveBillAmt(b),0);
@@ -3551,7 +3600,7 @@ function Accounts({ accounts, setAccounts, debts, bills }) {
   // Emergency fund coverage: liquid (Checking + Savings) balance / average monthly bills.
   // Classic guidance is 3-6 months of expenses held in cash.
   const liquidBalance = accounts.filter(a=>a.type==='Checking'||a.type==='Savings').reduce((s,a)=>s+a.balance,0);
-  const avgMonthlyBills = (bills||[]).reduce((s,b)=>s+b.amount,0);
+  const avgMonthlyBills = (bills||[]).filter(b=>billActiveInMonth(b,curYM())).reduce((s,b)=>s+b.amount,0);
   const monthsCovered = avgMonthlyBills > 0 ? liquidBalance / avgMonthlyBills : null;
   const efColor = monthsCovered === null ? '#94a3b8' : monthsCovered >= 6 ? '#34d399' : monthsCovered >= 3 ? '#fbbf24' : '#f87171';
   const efLabel = monthsCovered === null ? 'add bills to calculate' : monthsCovered >= 6 ? 'Fully funded' : monthsCovered >= 3 ? 'Building' : 'Underfunded';
@@ -3738,7 +3787,7 @@ function CalendarTab({ income, bills, sched }) {
   });
 
   // Bills by due day
-  bills.forEach(b => {
+  bills.filter(b => billActiveInMonth(b, ym)).forEach(b => {
     if (b.dueDay) {
       const daysInMonth = new Date(y, m, 0).getDate();
       if (b.dueDay <= daysInMonth) {
