@@ -68,10 +68,10 @@ button:not(:disabled):active { filter: brightness(0.9); transform: scale(0.97); 
 .int-card:hover { background: #243447 !important; box-shadow: 0 1px 2px rgba(0,0,0,0.45), 0 6px 14px rgba(0,0,0,0.3); }
 
 /* bank sync review rows */
-.sf-row { display:grid; grid-template-columns:22px 1fr 128px 84px 26px; grid-template-areas:"chk desc cat amt x"; gap:8px; align-items:center; padding:7px 0; border-bottom:1px solid #1e293b; font-size:12px; }
-.sf-chk { grid-area:chk; } .sf-desc { grid-area:desc; min-width:0; } .sf-cat { grid-area:cat; } .sf-amt { grid-area:amt; text-align:right; } .sf-x { grid-area:x; }
+.sf-row { display:grid; grid-template-columns:22px 1fr 190px 84px 26px; grid-template-areas:"chk desc sel amt x"; gap:8px; align-items:center; padding:7px 0; border-bottom:1px solid #1e293b; font-size:12px; }
+.sf-chk { grid-area:chk; } .sf-desc { grid-area:desc; min-width:0; } .sf-sel { grid-area:sel; display:flex; flex-direction:column; gap:4px; } .sf-amt { grid-area:amt; text-align:right; } .sf-x { grid-area:x; }
 @media (max-width: 640px) {
-  .sf-row { grid-template-columns:22px 1fr 84px 26px; grid-template-areas:"chk desc amt x" ". cat cat cat"; }
+  .sf-row { grid-template-columns:22px 1fr 84px 26px; grid-template-areas:"chk desc amt x" ". sel sel sel"; }
 }
 
 /* toast notifications */
@@ -1003,18 +1003,20 @@ function BudgetApp({ user }) {
   }), [ym, setMonths, numPeriods]);
 
   const importBankTxns = useCallback(rows => {
-    const three = sched.threePaycheckMonths || [6, 12];
-    setMonths(prev => {
-      const next = { ...prev };
-      rows.forEach(r => {
-        const n = three.includes(parseInt(r.ym.slice(5), 10)) ? 3 : 2;
-        const cur = migrateMonth(next[r.ym] || makeMonth(n));
-        const txn = { id: uid(), date: r.date, desc: r.desc, comment: '', cat: r.cat, amount: r.amount, periodIdx: r.periodIdx, recurring: 'none', sfId: r.key };
-        next[r.ym] = { ...cur, txns: [txn, ...(cur.txns || [])] };
-      });
-      return next;
-    });
-  }, [setMonths, sched]);
+    const res = sfApplyImport(months, rows, bills, sched.threePaycheckMonths || [6, 12], funds, income);
+    setMonths(res.months);
+    if (res.fundUps.length) setFunds(prev => sfApplyFundUps(prev, res.fundUps));
+    if (res.debtUps.length) {
+      setDebts(prev => prev.map(d => {
+        let out = d;
+        res.debtUps.filter(u => u.debtId === d.id).forEach(u => {
+          out = { ...out, balance: Math.max(0, out.balance - u.amt), payments: { ...out.payments, [`${u.ym}_${u.billId}`]: { ym: u.ym, actual: u.amt, source: 'bill', billId: u.billId } } };
+        });
+        return out;
+      }));
+    }
+    return res;
+  }, [months, bills, sched, funds, income, setMonths, setFunds, setDebts]);
 
   const toggleBillPaid = useCallback((billId) => {
     const bill = bills.find(b => b.id === billId);
@@ -1127,7 +1129,7 @@ function BudgetApp({ user }) {
         {tab==='debts'         && <Debts debts={debts} setDebts={setDebts} ym={ym} income={income} />}
         {tab==='accounts'      && (
           <>
-            <BankSyncPanel sf={sf} setSf={setSf} review={sfReview} setReview={setSfReview} months={months} sched={sched} bills={bills} cats={cats} importBankTxns={importBankTxns} />
+            <BankSyncPanel sf={sf} setSf={setSf} review={sfReview} setReview={setSfReview} months={months} sched={sched} bills={bills} funds={funds} income={income} cats={cats} accounts={accounts} setAccounts={setAccounts} importBankTxns={importBankTxns} />
             <Accounts accounts={accounts} setAccounts={setAccounts} debts={debts} bills={bills} />
           </>
         )}
@@ -3713,14 +3715,183 @@ function sfLocalDate(sec) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
+// Only money going out can match a bill.
 function sfMatchBill(row, bills) {
+  if (row.amount <= 0) return null;
   const d = row.desc.toLowerCase();
-  const hit = (bills || []).filter(b => billDueInMonth(b, row.ym)).find(b => {
+  return (bills || []).filter(b => billDueInMonth(b, row.ym)).find(b => {
     const nm = (b.name || '').toLowerCase().trim();
     if (nm.length >= 4 && d.includes(nm)) return true;
     return b.type !== 'estimated' && Math.abs(b.amount - row.amount) < 0.005;
+  }) || null;
+}
+
+// Month + pay-period choices for one row, centred on the transaction's own month (stable while the user changes it).
+function sfPeriodOptions(dateStr, sched) {
+  const three = (sched && sched.threePaycheckMonths) || [6, 12];
+  const center = dateStr.slice(0, 7);
+  const out = [];
+  [adjMonth(center, -1), center, adjMonth(center, 1)].forEach(ym => {
+    const n = three.includes(parseInt(ym.slice(5), 10)) ? 3 : 2;
+    const ps = (sched && sched.anchorDate) ? getPayPeriodsForMonth(sched.anchorDate, ym, n, three) : [];
+    const mon = monthLabel(ym).split(' ')[0].slice(0, 3);
+    for (let i = 0; i < n; i++) out.push({ value: `${ym}|${i}`, label: ps[i] ? `${mon} P${i+1} · ${ps[i].dateLabel}` : `${mon} P${i+1}` });
   });
-  return hit ? hit.name : '';
+  return out;
+}
+
+// A row's destination is stored as "kind:id" — bill:<id>, fund:<id> or inc:<id>. Empty means a budget category.
+function sfDest(r) {
+  const s = r.dest || '';
+  const i = s.indexOf(':');
+  return i < 0 ? { kind: '', id: '' } : { kind: s.slice(0, i), id: s.slice(i + 1) };
+}
+
+// A transfer shows up twice (out of one account, into the other). Pair them so only one side is counted.
+function sfPairTransfers(rows) {
+  rows.forEach(r => {
+    if (r.pairKey) return;
+    const t0 = new Date(r.date + 'T12:00:00').getTime();
+    const o = rows.find(x => x !== r && !x.pairKey && x.acctId !== r.acctId && Math.abs(x.amount + r.amount) < 0.005
+      && (r.xfer || x.xfer) && Math.abs(new Date(x.date + 'T12:00:00').getTime() - t0) <= 3 * 86400000);
+    if (o) { r.pairKey = o.key; r.pairAcct = o.acctName; o.pairKey = r.key; o.pairAcct = r.acctName; }
+  });
+}
+
+const sfIsFundDest = r => { const k = sfDest(r).kind; return k === 'fund' || k === 'fundout'; };
+// The side of a transfer that actually moves Month Budget money: money leaving to a fund, or money arriving from one.
+const sfBudgetSide = r => (sfDest(r).kind === 'fund' && r.amount > 0) || (sfDest(r).kind === 'fundout' && r.amount < 0);
+
+// If a transfer is booked against a sinking fund, its twin in the other account is skipped so the money isn't counted twice.
+function sfPlanImport(selected, allRows) {
+  const skip = new Set();
+  const selKeys = new Set(selected.map(r => r.key));
+  selected.forEach(r => {
+    if (!sfIsFundDest(r) || !r.pairKey) return;
+    const tw = allRows.find(x => x.key === r.pairKey);
+    if (!tw) return;
+    if (selKeys.has(tw.key) && sfIsFundDest(tw)) {
+      const pr = sfBudgetSide(r) ? 1 : 0, pt = sfBudgetSide(tw) ? 1 : 0;
+      skip.add(pr < pt || (pr === pt && r.key > tw.key) ? r.key : tw.key);
+    } else skip.add(tw.key);
+  });
+  return { use: selected.filter(r => !skip.has(r.key)), dismissed: allRows.filter(x => skip.has(x.key)) };
+}
+
+function sfSummarize(rows) {
+  const s = { spend: 0, credit: 0, bills: 0, inc: 0, toSav: 0, fromSav: 0 };
+  rows.forEach(r => {
+    const k = sfDest(r).kind;
+    if (k === 'bill' && r.amount > 0) s.bills++;
+    else if (k === 'inc' && r.amount < 0) s.inc -= r.amount;
+    else if (k === 'fund') s.toSav += Math.abs(r.amount);
+    else if (k === 'fundout') s.fromSav += Math.abs(r.amount);
+    else if (r.amount > 0) s.spend += r.amount;
+    else s.credit -= r.amount;
+  });
+  return s;
+}
+
+function sfSuggestDest(row, bills, funds, income) {
+  const d = row.desc.toLowerCase();
+  const fund = (funds || []).find(f => (f.name || '').trim().length >= 4 && d.includes(f.name.toLowerCase().trim()));
+  if (fund) return (row.amount > 0 ? 'fund:' : 'fundout:') + fund.id;
+  if (row.amount < 0) {
+    const named = (income || []).find(s => (s.name || '').trim().length >= 3 && d.includes(s.name.toLowerCase().trim()));
+    if (named) return 'inc:' + named.id;
+    if ((income || []).length === 1 && /payroll|direct\s*dep|dir\s*dep|salary|paycheck|wages/i.test(row.desc)) return 'inc:' + income[0].id;
+    return '';
+  }
+  const b = sfMatchBill(row, bills);
+  return b ? 'bill:' + b.id : '';
+}
+
+// Sinking-fund changes: positive = deposit, negative = withdrawal. Balance never goes below zero (same as the Sinking Funds tab).
+function sfApplyFundUps(funds, ups) {
+  return funds.map(f => {
+    const mine = ups.filter(u => u.fundId === f.id);
+    if (!mine.length) return f;
+    let bal = f.balance;
+    const txns = [...(f.txns || [])];
+    mine.forEach(u => { bal = Math.max(0, bal + u.amt); txns.push({ id: uid(), date: u.date, amount: u.amt, source: u.source }); });
+    return { ...f, balance: bal, txns };
+  });
+}
+
+// Bank balances to push into linked Accounts-tab accounts. Several bank accounts may feed one tab account (summed).
+function sfLinkedBalances(data, links) {
+  const sums = {};
+  (data.accounts || []).forEach(a => {
+    const target = (links || {})[a.id];
+    const b = parseFloat(a.balance);
+    if (target && isFinite(b)) sums[target] = Math.round(((sums[target] || 0) + b) * 100) / 100;
+  });
+  return sums;
+}
+
+// Pure import step. Each row goes where its destination says:
+//   bill:<id>     -> marks the bill paid (no transaction)
+//   fund:<id>     -> money moved INTO the sinking fund. Leaving checking: a Month Budget contribution for that
+//                    period (same record the fund's "+ Add" box makes). Arriving in a savings row: fund balance only.
+//   fundout:<id>  -> money moved OUT of the fund. Arriving in checking: fund withdrawal AND a credit transaction.
+//                    Leaving a savings row: fund withdrawal only.
+//   inc:<id>      -> sets that income source's amount for the pay period to the deposit
+//   (none)        -> a Month Budget transaction (negative amount = credit/refund)
+function sfApplyImport(months, rows, bills, three, funds, income) {
+  const next = { ...months };
+  const debtUps = [], fundUps = [];
+  let txnCount = 0, marked = 0, already = 0, deposits = 0, withdrawals = 0, incomeCount = 0;
+  rows.forEach(r => {
+    const n = three.includes(parseInt(r.ym.slice(5), 10)) ? 3 : 2;
+    const cur = migrateMonth(next[r.ym] || makeMonth(n));
+    const { kind, id } = sfDest(r);
+    const bill = kind === 'bill' && r.amount > 0 ? (bills || []).find(b => b.id === id) : null;
+    const fund = (kind === 'fund' || kind === 'fundout') ? (funds || []).find(f => f.id === id) : null;
+    const src  = kind === 'inc' && r.amount < 0 ? (income || []).find(s => s.id === id) : null;
+
+    if (bill) {
+      if ((cur.paid || {})[bill.id]) { already++; next[r.ym] = cur; return; }
+      const est = bill.type === 'estimated';
+      next[r.ym] = {
+        ...cur,
+        paid: { ...(cur.paid || {}), [bill.id]: true },
+        estimatedBillAmounts: est ? { ...(cur.estimatedBillAmounts || {}), [bill.id]: r.amount } : cur.estimatedBillAmounts,
+      };
+      if (bill.linkedDebtId) debtUps.push({ debtId: bill.linkedDebtId, billId: bill.id, ym: r.ym, amt: est ? r.amount : bill.amount });
+      marked++;
+      return;
+    }
+    if (fund && kind === 'fund') {
+      const fromBudget = r.amount > 0;
+      fundUps.push({ fundId: fund.id, amt: Math.abs(r.amount), date: r.date, source: fromBudget ? `budget:${r.ym}:P${r.periodIdx + 1}` : 'bank-transfer' });
+      next[r.ym] = cur;
+      deposits++;
+      return;
+    }
+    if (src) {
+      const pi = [...(cur.periodIncomes || [])];
+      while (pi.length <= r.periodIdx) pi.push({ earned: DEF_PERIOD_EARNED, rollover: 0 });
+      const entry = pi[r.periodIdx];
+      // The first deposit replaces the planned amount; further deposits for the same source and period add to it.
+      const total = Math.round((((entry.sfIncome || {})[src.id] || 0) - r.amount) * 100) / 100;
+      const sources = { ...(entry.sources || {}), [src.id]: total };
+      const earned = (income || []).reduce((s, x) => s + (sources[x.id] ?? x.amount), 0);
+      pi[r.periodIdx] = { ...entry, sfIncome: { ...(entry.sfIncome || {}), [src.id]: total }, sources, earned };
+      next[r.ym] = { ...cur, periodIncomes: pi };
+      incomeCount++;
+      return;
+    }
+    if (fund && kind === 'fundout') {
+      // 'bank-transfer' (not budget:) so Month Budget doesn't also count it as a contribution; the credit transaction carries it.
+      fundUps.push({ fundId: fund.id, amt: -Math.abs(r.amount), date: r.date, source: 'bank-transfer' });
+      withdrawals++;
+      if (r.amount > 0) { next[r.ym] = cur; return; }
+    }
+    const txn = { id: uid(), date: r.date, desc: r.desc, comment: '', cat: r.cat, amount: r.amount, periodIdx: r.periodIdx, recurring: 'none', sfId: r.key };
+    next[r.ym] = { ...cur, txns: [txn, ...(cur.txns || [])] };
+    txnCount++;
+  });
+  return { months: next, debtUps, fundUps, txnCount, marked, already, deposits, withdrawals, incomeCount };
 }
 
 // Which month budget + pay period does this date belong to? Uses the same period chain as Month Budget.
@@ -3759,9 +3930,8 @@ function sfFindDuplicate(row, months) {
     && Math.abs(new Date(t.date + 'T12:00:00').getTime() - t0) <= 3 * 86400000);
 }
 
-function sfBuildRows({ data, haveIds, accountsOff, months, sched, bills, catNames, suggestions, prevRows }) {
+function sfBuildRows({ data, haveIds, accountsOff, months, sched, bills, funds, income, catNames, suggestions, prevRows }) {
   const rows = [];
-  let skippedIn = 0;
   (data.accounts || []).forEach(a => {
     if (accountsOff[a.id]) return;
     const acctName = a.name || 'Account';
@@ -3769,7 +3939,6 @@ function sfBuildRows({ data, haveIds, accountsOff, months, sched, bills, catName
       if (t.pending) return;
       const amt = parseFloat(t.amount);
       if (!amt) return;
-      if (amt > 0) { skippedIn++; return; }
       const key = `${a.conn_id || ''}:${a.id}:${t.id}`;
       if (haveIds.has(key)) return;
       const epoch = t.transacted_at > 0 ? t.transacted_at : t.posted;
@@ -3777,23 +3946,29 @@ function sfBuildRows({ data, haveIds, accountsOff, months, sched, bills, catName
       const date = sfLocalDate(epoch);
       const desc = String(t.description || '').replace(/\s+/g, ' ').trim() || 'Bank transaction';
       const tgt = sfPeriodForDate(date, sched);
-      const row = { key, epoch, acctName, date, desc, amount: Math.abs(amt), ym: tgt.ym, periodIdx: tgt.periodIdx, approx: tgt.approx };
+      // Same sign convention as Month Budget: money out is positive, money in (credit) is negative.
+      const row = { key, epoch, acctId: a.id, acctName, date, desc, amount: -amt, ym: tgt.ym, periodIdx: tgt.periodIdx, approx: tgt.approx };
+      row.credit = row.amount < 0;
       row.monthMissing = !months[row.ym];
       row.dup = sfFindDuplicate(row, months);
       row.cat = sfSuggestCat(desc, suggestions, catNames);
       row.xfer = /transfer/i.test(desc);
-      row.bill = sfMatchBill(row, bills);
-      row.checked = !row.dup && !row.monthMissing && !row.xfer && !row.bill;
+      row.dest = sfSuggestDest(row, bills, funds, income);
+      row.checked = !row.dup && !row.monthMissing && !row.xfer && !row.dest && !row.credit;
       const prev = (prevRows || []).find(p => p.key === key);
-      if (prev) { row.cat = prev.cat; row.checked = prev.checked; }
+      if (prev) {
+        row.cat = prev.cat; row.checked = prev.checked; row.dest = prev.dest;
+        if (prev.manual) { row.ym = prev.ym; row.periodIdx = prev.periodIdx; row.monthMissing = prev.monthMissing; row.dup = prev.dup; row.approx = false; row.manual = true; }
+      }
       rows.push(row);
     });
   });
+  sfPairTransfers(rows);
   rows.sort((x, y) => y.epoch - x.epoch);
-  return { rows, skippedIn };
+  return { rows };
 }
 
-function BankSyncPanel({ sf, setSf, review, setReview, months, sched, bills, cats, importBankTxns }) {
+function BankSyncPanel({ sf, setSf, review, setReview, months, sched, bills, funds, income, cats, accounts, setAccounts, importBankTxns }) {
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -3819,6 +3994,26 @@ function BankSyncPanel({ sf, setSf, review, setReview, months, sched, bills, cat
     () => { setSf(c => ({ handled: c.handled || {} })); setReview(null); setErr(''); setDoneMsg(''); }
   );
 
+  // Copy bank balances into the Accounts-tab accounts the user linked to them.
+  const pushBalances = (rawAccounts, links) => {
+    const sums = sfLinkedBalances({ accounts: rawAccounts }, links);
+    if (!Object.keys(sums).length) return;
+    setAccounts(prev => prev.map(a => sums[a.id] !== undefined ? { ...a, balance: sums[a.id] } : a));
+  };
+  const setLink = (sfId, appId) => {
+    const links = { ...(sf.links || {}) };
+    if (appId === '__new__') {
+      const src = sfAccounts.find(a => a.id === sfId);
+      if (!src) return;
+      const id = uid();
+      setAccounts(p => [...p, { id, name: src.name, type: /sav/i.test(src.name) ? 'Savings' : 'Checking', balance: isFinite(src.balance) ? src.balance : 0, snapshots: {} }]);
+      links[sfId] = id;
+    } else if (appId) links[sfId] = appId;
+    else delete links[sfId];
+    setSf(c => ({ ...c, links }));
+    if (appId !== '__new__') pushBalances(sfAccounts, links);
+  };
+
   const sync = async () => {
     setBusy(true); setErr(''); setDoneMsg('');
     try {
@@ -3829,10 +4024,11 @@ function BankSyncPanel({ sf, setSf, review, setReview, months, sched, bills, cat
       const data = await sfFetchAccounts(sf.accessUrl, Math.floor(now / 1000) - (+lookback) * 86400);
       const haveIds = new Set(Object.keys(sf.handled || {}));
       Object.values(months).forEach(m => (m.txns || []).forEach(t => { if (t.sfId) haveIds.add(t.sfId); }));
-      const { rows, skippedIn } = sfBuildRows({
-        data, haveIds, accountsOff: sf.accountsOff || {}, months, sched, bills, catNames,
+      const { rows } = sfBuildRows({
+        data, haveIds, accountsOff: sf.accountsOff || {}, months, sched, bills, funds, income, catNames,
         suggestions: buildSuggestions(months || {}), prevRows: review ? review.rows : [],
       });
+      pushBalances(data.accounts, sf.links);
       const errors = (data.errlist || []).map(e => e.msg || e.code)
         .concat((data.errors || []).map(e => typeof e === 'string' ? e : (e.msg || e.code || '')))
         .filter(Boolean);
@@ -3843,7 +4039,7 @@ function BankSyncPanel({ sf, setSf, review, setReview, months, sched, bills, cat
         const accounts = (data.accounts || []).map(a => ({ id: a.id, name: a.name, org: (a.org && (a.org.name || a.org.domain)) || '', balance: parseFloat(a.balance), date: a['balance-date'] || 0 }));
         return { ...c, lastSync: now, handled, accounts };
       });
-      setReview({ rows, skippedIn, errors, at: now });
+      setReview({ rows, errors, at: now });
     } catch (e) { setErr(e.message); }
     setBusy(false);
   };
@@ -3854,19 +4050,44 @@ function BankSyncPanel({ sf, setSf, review, setReview, months, sched, bills, cat
     setSf(c => ({ ...c, handled: { ...(c.handled || {}), [r.key]: r.epoch } }));
     setReview(rv => ({ ...rv, rows: rv.rows.filter(x => x.key !== r.key) }));
   };
+  const setRowPeriod = (r, value) => {
+    const [ym, idx] = value.split('|');
+    updRow(r.key, { ym, periodIdx: +idx, monthMissing: !months[ym], dup: sfFindDuplicate({ ...r, ym }, months), approx: false, manual: true });
+  };
   const selected = review ? review.rows.filter(r => r.checked) : [];
-  const selectedTotal = selected.reduce((s, r) => s + r.amount, 0);
+  const plan = review ? sfPlanImport(selected, review.rows) : { use: [], dismissed: [] };
+  const sum = sfSummarize(plan.use);
+  const plainCredits = plan.use.filter(r => r.amount < 0 && !sfDest(r).kind && (r.xfer || /payroll|direct\s*dep|salary/i.test(r.desc))).length;
   const doImport = () => {
     if (!selected.length) return;
-    importBankTxns(selected);
-    const keys = new Set(selected.map(r => r.key));
+    const res = importBankTxns(plan.use);
+    const done = [...selected, ...plan.dismissed];
+    const keys = new Set(done.map(r => r.key));
     setSf(c => {
       const handled = { ...(c.handled || {}) };
-      selected.forEach(r => { handled[r.key] = r.epoch; });
+      done.forEach(r => { handled[r.key] = r.epoch; });
       return { ...c, handled };
     });
     setReview(rv => ({ ...rv, rows: rv.rows.filter(r => !keys.has(r.key)) }));
-    setDoneMsg(`Imported ${selected.length} transaction${selected.length === 1 ? '' : 's'} into Month Budget.`);
+    const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+    const parts = [];
+    if (res.txnCount) parts.push(`${plural(res.txnCount, 'transaction')} added`);
+    if (res.marked) parts.push(`${plural(res.marked, 'bill')} marked paid`);
+    if (res.already) parts.push(`${plural(res.already, 'bill')} already paid`);
+    if (res.incomeCount) parts.push(`${plural(res.incomeCount, 'paycheck')} set as income`);
+    if (res.deposits) parts.push(`${plural(res.deposits, 'sinking fund deposit')}`);
+    if (res.withdrawals) parts.push(`${plural(res.withdrawals, 'sinking fund withdrawal')}`);
+    if (plan.dismissed.length) parts.push(`${plural(plan.dismissed.length, 'matching transfer side')} skipped`);
+    setDoneMsg(parts.join(', ') + '.');
+  };
+  const hint = r => {
+    const { kind } = sfDest(r);
+    const per = `${monthLabel(r.ym).split(' ')[0].slice(0, 3)} P${r.periodIdx + 1}`;
+    if (kind === 'bill') return r.amount > 0 ? `Marks the bill paid in ${monthLabel(r.ym).split(' ')[0]}` : '';
+    if (kind === 'inc') return r.amount < 0 ? `Sets this source's income for ${per}` : '';
+    if (kind === 'fund') return r.amount > 0 ? `Sinking fund deposit counted in ${per}` : 'Adds to the fund only (no budget impact)';
+    if (kind === 'fundout') return r.amount < 0 ? 'Takes from the fund and adds a credit' : 'Takes from the fund only (no budget impact)';
+    return '';
   };
   const toggleAcct = id => setSf(c => ({ ...c, accountsOff: { ...(c.accountsOff || {}), [id]: !(c.accountsOff || {})[id] } }));
 
@@ -3913,21 +4134,29 @@ function BankSyncPanel({ sf, setSf, review, setReview, months, sched, bills, cat
         <>
           <div style={{ ...note, marginTop:10, marginBottom:10 }}>
             {sf.lastSync ? <>Last synced {new Date(sf.lastSync).toLocaleString()}. </> : <>Not synced yet. </>}
-            Banks post transactions after they clear, so recent purchases can take a few days to show up. Money coming in (deposits and transfers in) is skipped.
+            Banks post transactions after they clear, so recent purchases can take a few days to show up. Paychecks and transfers in appear as credits, unchecked by default.
           </div>
           {sfAccounts.length > 0 && (
             <div style={{ marginBottom:14 }}>
-              <div style={S.lbl}>Accounts to import from</div>
+              <div style={S.lbl}>Bank accounts</div>
               {sfAccounts.map(a => (
-                <label key={a.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'6px 0', fontSize:13, cursor:'pointer' }}>
-                  <input type="checkbox" checked={!(sf.accountsOff || {})[a.id]} onChange={()=>toggleAcct(a.id)} />
-                  <span style={{ flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                    {a.org && <span style={{ color:'#64748b' }}>{a.org} · </span>}{a.name}
-                  </span>
-                  <span style={{ color:'#34d399', fontWeight:600 }}>{isNaN(a.balance) ? '—' : fmtS(a.balance)}</span>
-                </label>
+                <div key={a.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'6px 0', fontSize:13, flexWrap:'wrap' }}>
+                  <label style={{ display:'flex', alignItems:'center', gap:10, flex:'1 1 220px', minWidth:0, cursor:'pointer' }} title="Include this account when importing transactions">
+                    <input type="checkbox" checked={!(sf.accountsOff || {})[a.id]} onChange={()=>toggleAcct(a.id)} />
+                    <span style={{ flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {a.org && <span style={{ color:'#64748b' }}>{a.org} · </span>}{a.name}
+                    </span>
+                  </label>
+                  <span style={{ color:'#34d399', fontWeight:600, minWidth:90, textAlign:'right' }}>{isNaN(a.balance) ? '—' : fmtS(a.balance)}</span>
+                  <select value={(sf.links || {})[a.id] || ''} onChange={e=>setLink(a.id, e.target.value)} title="Keep an Accounts-tab balance in sync with this bank account"
+                    style={{ ...S.input, width:170, fontSize:11, padding:'3px 6px' }}>
+                    <option value="">Balance: not linked</option>
+                    {(accounts || []).map(x=><option key={x.id} value={x.id}>{'Balance → ' + x.name}</option>)}
+                    <option value="__new__">+ Add to Accounts tab</option>
+                  </select>
+                </div>
               ))}
-              <div style={{ fontSize:11, color:'#475569' }}>Changes apply on the next sync.</div>
+              <div style={{ fontSize:11, color:'#475569' }}>The checkbox applies on the next sync. A linked account's balance in the Accounts tab updates every sync.</div>
             </div>
           )}
 
@@ -3939,7 +4168,7 @@ function BankSyncPanel({ sf, setSf, review, setReview, months, sched, bills, cat
 
           {review && review.rows.length === 0 && (
             <div style={{ color:'#475569', fontSize:13, padding:'8px 0' }}>
-              Nothing new to review{review.skippedIn ? ` (${review.skippedIn} incoming deposit${review.skippedIn===1?'':'s'} skipped)` : ''}.
+              Nothing new to review.
             </div>
           )}
 
@@ -3948,7 +4177,6 @@ function BankSyncPanel({ sf, setSf, review, setReview, months, sched, bills, cat
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8, marginBottom:6 }}>
                 <span style={{ fontSize:13, fontWeight:600, color:'#e2e8f0' }}>
                   {review.rows.length} new to review
-                  {review.skippedIn ? <span style={{ fontWeight:400, color:'#475569' }}> · {review.skippedIn} deposit{review.skippedIn===1?'':'s'} skipped</span> : null}
                 </span>
                 <span style={{ display:'flex', gap:6 }}>
                   <button onClick={()=>setAll(true)} style={{ ...S.btn, fontSize:11, padding:'3px 9px' }}>Select all</button>
@@ -3956,34 +4184,94 @@ function BankSyncPanel({ sf, setSf, review, setReview, months, sched, bills, cat
                 </span>
               </div>
               <div style={{ maxHeight:420, overflowY:'auto', marginBottom:12 }}>
-                {review.rows.map(r => (
-                  <div key={r.key} className="sf-row" style={{ opacity:r.checked?1:0.6 }}>
+                {review.rows.map(r => {
+                  const opts = sfPeriodOptions(r.date, sched);
+                  const cur = `${r.ym}|${r.periodIdx}`;
+                  const dk = sfDest(r).kind;
+                  const billOpts = (bills || []).filter(b => billDueInMonth(b, r.ym) || b.id === sfDest(r).id);
+                  const asOther = !!dk;
+                  const twinSkipped = plan.dismissed.some(x => x.key === r.key);
+                  return (
+                  <div key={r.key} className="sf-row" style={{ opacity:(r.checked && !twinSkipped)?1:0.6 }}>
                     <input className="sf-chk" type="checkbox" checked={r.checked} onChange={e=>updRow(r.key,{checked:e.target.checked})} />
                     <div className="sf-desc">
                       <div style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', color:'#e2e8f0' }} title={r.desc}>{r.desc}</div>
                       <div style={{ fontSize:11, color:'#475569' }}>
-                        {shortDate(new Date(r.date + 'T12:00:00'))} · {r.acctName} · {monthLabel(r.ym).split(' ')[0].slice(0,3)} P{r.periodIdx+1}
+                        {shortDate(new Date(r.date + 'T12:00:00'))} · {r.acctName}
+                        {r.credit && <span style={{ marginLeft:6, color:'#34d399' }}>credit</span>}
                         {r.dup && <span style={{ marginLeft:6, color:'#fbbf24' }}>possible duplicate</span>}
                         {r.xfer && <span style={{ marginLeft:6, color:'#fbbf24' }}>looks like a transfer</span>}
-                        {r.bill && <span style={{ marginLeft:6, color:'#fbbf24' }}>may be your bill: {r.bill}</span>}
+                        {r.pairKey && <span style={{ marginLeft:6, color:'#a78bfa' }}>matches {r.pairAcct}</span>}
                         {r.monthMissing && <span style={{ marginLeft:6, color:'#fb923c' }}>month not set up</span>}
                         {r.approx && <span style={{ marginLeft:6, color:'#94a3b8' }}>no pay schedule match</span>}
                       </div>
+                      {twinSkipped
+                        ? <div style={{ fontSize:11, color:'#a78bfa' }}>Other side of a transfer you booked to a fund. Skipped, not counted twice.</div>
+                        : hint(r) && <div style={{ fontSize:11, color:'#64748b' }}>{hint(r)}</div>}
                     </div>
-                    <select className="sf-cat" value={r.cat} onChange={e=>updRow(r.key,{cat:e.target.value})} style={{ ...S.input, fontSize:11, padding:'3px 6px' }}>
-                      {catNames.map(c=><option key={c}>{c}</option>)}
-                    </select>
-                    <span className="sf-amt" style={{ color:'#fbbf24', fontWeight:600 }}>{fmt(r.amount)}</span>
+                    <div className="sf-sel">
+                      <select value={opts.some(o=>o.value===cur) ? cur : ''} onChange={e=>setRowPeriod(r, e.target.value)} title="Month and pay period" style={{ ...S.input, fontSize:11, padding:'3px 6px' }}>
+                        {!opts.some(o=>o.value===cur) && <option value="">{r.ym} P{r.periodIdx+1}</option>}
+                        {opts.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                      <select value={r.dest || ''} onChange={e=>updRow(r.key,{dest:e.target.value, checked: e.target.value ? true : r.checked})}
+                        title="Where this goes" style={{ ...S.input, fontSize:11, padding:'3px 6px', ...(asOther?{borderColor:'#a78bfa',color:'#c4b5fd'}:{}) }}>
+                        <option value="">{r.credit ? 'Credit / refund (Month Budget)' : 'Spending (Month Budget)'}</option>
+                        {!r.credit && billOpts.length > 0 && (
+                          <optgroup label="Mark a bill paid">
+                            {billOpts.map(b=><option key={b.id} value={'bill:'+b.id}>{b.name}</option>)}
+                          </optgroup>
+                        )}
+                        {r.credit && (income || []).length > 0 && (
+                          <optgroup label="Paycheck → income">
+                            {income.map(s=><option key={s.id} value={'inc:'+s.id}>{s.name}</option>)}
+                          </optgroup>
+                        )}
+                        {(funds || []).length > 0 && (
+                          <optgroup label="Deposit to sinking fund">
+                            {funds.map(f=><option key={'d'+f.id} value={'fund:'+f.id}>{f.name}</option>)}
+                          </optgroup>
+                        )}
+                        {(funds || []).length > 0 && (
+                          <optgroup label="Withdraw from sinking fund">
+                            {funds.map(f=><option key={'w'+f.id} value={'fundout:'+f.id}>{f.name}</option>)}
+                          </optgroup>
+                        )}
+                      </select>
+                      {(!asOther || (dk === 'fundout' && r.amount < 0)) && (
+                        <select value={r.cat} onChange={e=>updRow(r.key,{cat:e.target.value})} title="Budget category" style={{ ...S.input, fontSize:11, padding:'3px 6px' }}>
+                          {catNames.map(c=><option key={c}>{c}</option>)}
+                        </select>
+                      )}
+                    </div>
+                    <span className="sf-amt" style={{ color:r.credit?'#34d399':'#fbbf24', fontWeight:600 }}>{r.credit ? '+' : ''}{fmt(r.amount)}</span>
                     <button className="sf-x" onClick={()=>dismiss(r)} title="Never show this one again" style={{ ...S.btn, padding:'1px 6px', fontSize:12, color:'#64748b', background:'transparent' }}>✕</button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
               <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
                 <button onClick={doImport} disabled={!selected.length} style={{ ...S.btn, background:'#7c3aed', color:'#fff', fontWeight:600, opacity:selected.length?1:0.5 }}>
                   <i className="fa-solid fa-check" style={{ marginRight:6 }} />Import {selected.length} selected
                 </button>
-                <span style={{ fontSize:12, color:'#64748b' }}>{fmt(selectedTotal)} total. Unchecked items stay here and come back on the next sync.</span>
+                <span style={{ fontSize:12, color:'#64748b' }}>
+                  {[
+                    sum.spend > 0 && `${fmt(sum.spend)} spending`,
+                    sum.credit > 0 && `${fmt(sum.credit)} credits`,
+                    sum.bills > 0 && `${sum.bills} bill${sum.bills===1?'':'s'} marked paid`,
+                    sum.inc > 0 && `${fmt(sum.inc)} income`,
+                    sum.toSav > 0 && `${fmt(sum.toSav)} into funds`,
+                    sum.fromSav > 0 && `${fmt(sum.fromSav)} out of funds`,
+                  ].filter(Boolean).join(', ') || 'Nothing selected'}.
+                  {' '}Unchecked items stay here and come back on the next sync.
+                </span>
               </div>
+              {plainCredits > 0 && (
+                <div style={{ marginTop:10, padding:'8px 12px', borderRadius:8, background:'#2a2108', border:'1px solid #713f12', color:'#fcd34d', fontSize:12, lineHeight:1.5 }}>
+                  {plainCredits} selected credit{plainCredits===1?' looks':'s look'} like a paycheck or transfer but {plainCredits===1?'is':'are'} set to Credit / refund, which would reduce spending instead.
+                  Pick a paycheck source or a sinking fund for {plainCredits===1?'it':'them'}.
+                </div>
+              )}
             </>
           )}
         </>
