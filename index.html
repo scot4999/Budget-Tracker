@@ -67,6 +67,13 @@ button:not(:disabled):active { filter: brightness(0.9); transform: scale(0.97); 
 .int-card { transition: background 0.12s ease, box-shadow 0.12s ease; cursor: default; box-shadow: 0 1px 2px rgba(0,0,0,0.4), 0 4px 10px rgba(0,0,0,0.22); }
 .int-card:hover { background: #243447 !important; box-shadow: 0 1px 2px rgba(0,0,0,0.45), 0 6px 14px rgba(0,0,0,0.3); }
 
+/* bank sync review rows */
+.sf-row { display:grid; grid-template-columns:22px 1fr 128px 84px 26px; grid-template-areas:"chk desc cat amt x"; gap:8px; align-items:center; padding:7px 0; border-bottom:1px solid #1e293b; font-size:12px; }
+.sf-chk { grid-area:chk; } .sf-desc { grid-area:desc; min-width:0; } .sf-cat { grid-area:cat; } .sf-amt { grid-area:amt; text-align:right; } .sf-x { grid-area:x; }
+@media (max-width: 640px) {
+  .sf-row { grid-template-columns:22px 1fr 84px 26px; grid-template-areas:"chk desc amt x" ". cat cat cat"; }
+}
+
 /* toast notifications */
 @keyframes fadeInUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
 @keyframes fadeOut  { from { opacity:1; } to { opacity:0; } }
@@ -965,6 +972,8 @@ function BudgetApp({ user }) {
   const [sched,  setSched]  = useDB('bgt_payschedule',    DEF_PAYSCHEDULE,    uid);
   const [cats,   setCats]   = useDB('bgt_categories',     DEF_CATEGORIES,     uid);
   const [accounts, setAccounts] = useDB('bgt_accounts',    DEF_ACCOUNTS,       uid);
+  const [sf, setSf] = useDB('bgt_simplefin', {}, uid);
+  const [sfReview, setSfReview] = useState(null);
   const [overviewLayout, setOverviewLayout] = useDB('bgt_overview_layout', {
     order: ['payschedule','income','bills','categories'],
     collapsed: {}
@@ -993,6 +1002,20 @@ function BudgetApp({ user }) {
     return { ...prev, [ym]: fn(cur) };
   }), [ym, setMonths, numPeriods]);
 
+  const importBankTxns = useCallback(rows => {
+    const three = sched.threePaycheckMonths || [6, 12];
+    setMonths(prev => {
+      const next = { ...prev };
+      rows.forEach(r => {
+        const n = three.includes(parseInt(r.ym.slice(5), 10)) ? 3 : 2;
+        const cur = migrateMonth(next[r.ym] || makeMonth(n));
+        const txn = { id: uid(), date: r.date, desc: r.desc, comment: '', cat: r.cat, amount: r.amount, periodIdx: r.periodIdx, recurring: 'none', sfId: r.key };
+        next[r.ym] = { ...cur, txns: [txn, ...(cur.txns || [])] };
+      });
+      return next;
+    });
+  }, [setMonths, sched]);
+
   const toggleBillPaid = useCallback((billId) => {
     const bill = bills.find(b => b.id === billId);
     if (!bill) return;
@@ -1019,7 +1042,7 @@ function BudgetApp({ user }) {
   const saveStatus = useSaveStatus();
   const [remoteEditToast, setRemoteEditToast] = useState(null);
   useRemoteEditWatch(uid, user.displayName||user.email, info => {
-    const fieldLabel = { bgt_bills:'bills', bgt_income_sources:'income', bgt_months:'transactions', bgt_categories:'categories', bgt_funds:'sinking funds', bgt_debts:'debts', bgt_accounts:'accounts' };
+    const fieldLabel = { bgt_bills:'bills', bgt_income_sources:'income', bgt_months:'transactions', bgt_categories:'categories', bgt_funds:'sinking funds', bgt_debts:'debts', bgt_accounts:'accounts', bgt_simplefin:'bank sync' };
     const what = fieldLabel[info.field] || 'budget';
     setRemoteEditToast(`${info.by} updated ${what}`);
     setTimeout(() => setRemoteEditToast(null), 4000);
@@ -1102,7 +1125,12 @@ function BudgetApp({ user }) {
         {tab==='month budget'  && <MonthBudget mo={mo} updMo={updMo} bills={bills} income={income} ym={ym} toggleBillPaid={toggleBillPaid} periods={periods} effectiveIncomes={effectiveIncomes} numPeriods={numPeriods} funds={funds} setFunds={setFunds} cats={cats} months={months} />}
         {tab==='sinking funds' && <SinkingFunds funds={funds} setFunds={setFunds} />}
         {tab==='debts'         && <Debts debts={debts} setDebts={setDebts} ym={ym} income={income} />}
-        {tab==='accounts'      && <Accounts accounts={accounts} setAccounts={setAccounts} debts={debts} bills={bills} />}
+        {tab==='accounts'      && (
+          <>
+            <BankSyncPanel sf={sf} setSf={setSf} review={sfReview} setReview={setSfReview} months={months} sched={sched} bills={bills} cats={cats} importBankTxns={importBankTxns} />
+            <Accounts accounts={accounts} setAccounts={setAccounts} debts={debts} bills={bills} />
+          </>
+        )}
         {tab==='summary'       && <SummaryDashboard months={months} bills={bills} />}
         {tab==='calendar'      && <CalendarTab income={income} bills={bills} sched={sched} />}
       </div>
@@ -3634,6 +3662,335 @@ function SummaryDashboard({ months, bills }) {
 
 // ── Accounts / Net Worth ─────────────────────────────────────────────────────
 const ACCOUNT_TYPES = ['Checking','Savings','Investment','Cash','Other'];
+
+const SF_MAX_REQ_PER_DAY = 20; // SimpleFIN disables tokens that exceed 24 requests/day
+
+function isSimplefinHost(h) { return h === 'simplefin.org' || h.endsWith('.simplefin.org'); }
+
+async function sfClaim(input) {
+  const raw = (input || '').trim();
+  if (!raw) throw new Error('Paste the Setup Token from SimpleFIN first.');
+  let claimUrl = raw;
+  if (!/^https?:\/\//i.test(raw)) {
+    try {
+      const b64 = raw.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+      claimUrl = atob(b64 + '='.repeat((4 - b64.length % 4) % 4)).trim();
+    } catch { throw new Error('That does not look like a SimpleFIN Setup Token.'); }
+  }
+  let u;
+  try { u = new URL(claimUrl); } catch { throw new Error('That does not look like a SimpleFIN Setup Token.'); }
+  if (u.protocol !== 'https:' || !isSimplefinHost(u.hostname)) throw new Error('That token does not point to SimpleFIN.');
+  let res;
+  try { res = await fetch(u.href, { method: 'POST' }); }
+  catch { throw new Error('Could not reach SimpleFIN. Check your connection and try again.'); }
+  if (res.status === 403) throw new Error('SimpleFIN says this token is invalid or was already used. Create a new app connection and paste the new token.');
+  if (!res.ok) throw new Error(`SimpleFIN returned an error (${res.status}).`);
+  const accessUrl = (await res.text()).trim();
+  let a;
+  try { a = new URL(accessUrl); } catch { throw new Error('SimpleFIN returned an unexpected response.'); }
+  if (a.protocol !== 'https:' || !isSimplefinHost(a.hostname)) throw new Error('SimpleFIN returned an unexpected response.');
+  return accessUrl;
+}
+
+async function sfFetchAccounts(accessUrl, startSec) {
+  const u = new URL(accessUrl);
+  if (u.protocol !== 'https:' || !isSimplefinHost(u.hostname)) throw new Error('Stored SimpleFIN connection looks invalid. Disconnect and reconnect.');
+  const auth = 'Basic ' + btoa(decodeURIComponent(u.username) + ':' + decodeURIComponent(u.password));
+  const base = u.origin + u.pathname.replace(/\/$/, '');
+  let res;
+  try { res = await fetch(`${base}/accounts?start-date=${startSec}`, { headers: { Authorization: auth } }); }
+  catch { throw new Error('Could not reach SimpleFIN. Check your connection and try again.'); }
+  if (res.status === 402) throw new Error('SimpleFIN says payment is required. Check your SimpleFIN subscription.');
+  if (res.status === 403) throw new Error('SimpleFIN rejected the connection. It may have been revoked. Disconnect and reconnect with a new token.');
+  if (!res.ok) throw new Error(`SimpleFIN returned an error (${res.status}).`);
+  return res.json();
+}
+
+// A timestamp at exactly UTC midnight is a date-only value, so read it in UTC to avoid landing on the previous day.
+function sfLocalDate(sec) {
+  const d = new Date(sec * 1000);
+  if (sec % 86400 === 0) return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function sfMatchBill(row, bills) {
+  const d = row.desc.toLowerCase();
+  const hit = (bills || []).filter(b => billDueInMonth(b, row.ym)).find(b => {
+    const nm = (b.name || '').toLowerCase().trim();
+    if (nm.length >= 4 && d.includes(nm)) return true;
+    return b.type !== 'estimated' && Math.abs(b.amount - row.amount) < 0.005;
+  });
+  return hit ? hit.name : '';
+}
+
+// Which month budget + pay period does this date belong to? Uses the same period chain as Month Budget.
+function sfPeriodForDate(dateStr, sched) {
+  const fallbackYm = dateStr.slice(0, 7);
+  if (sched && sched.anchorDate) {
+    const three = sched.threePaycheckMonths || [6, 12];
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const day = new Date(y, m - 1, d).getTime();
+    for (const ym of [fallbackYm, adjMonth(fallbackYm, 1), adjMonth(fallbackYm, -1)]) {
+      const n = three.includes(parseInt(ym.slice(5), 10)) ? 3 : 2;
+      const ps = getPayPeriodsForMonth(sched.anchorDate, ym, n, three);
+      for (let i = 0; i < ps.length; i++) {
+        const s = ps[i].payDate;
+        const end = new Date(s.getFullYear(), s.getMonth(), s.getDate() + 14).getTime();
+        if (day >= s.getTime() && day < end) return { ym, periodIdx: i, approx: false };
+      }
+    }
+  }
+  return { ym: fallbackYm, periodIdx: +dateStr.slice(8, 10) <= 15 ? 0 : 1, approx: true };
+}
+
+function sfSuggestCat(desc, suggestions, catNames) {
+  const d = desc.toLowerCase();
+  const ok = s => catNames.includes(s.cat);
+  const hit = suggestions.find(s => ok(s) && s.desc.toLowerCase() === d)
+           || suggestions.find(s => ok(s) && s.desc.length >= 4 && d.includes(s.desc.toLowerCase()));
+  return hit ? hit.cat : (catNames[0] || 'Misc');
+}
+
+function sfFindDuplicate(row, months) {
+  const mo = months[row.ym];
+  if (!mo) return false;
+  const t0 = new Date(row.date + 'T12:00:00').getTime();
+  return (mo.txns || []).some(t => !t.sfId && Math.abs(t.amount - row.amount) < 0.005
+    && Math.abs(new Date(t.date + 'T12:00:00').getTime() - t0) <= 3 * 86400000);
+}
+
+function sfBuildRows({ data, haveIds, accountsOff, months, sched, bills, catNames, suggestions, prevRows }) {
+  const rows = [];
+  let skippedIn = 0;
+  (data.accounts || []).forEach(a => {
+    if (accountsOff[a.id]) return;
+    const acctName = a.name || 'Account';
+    (a.transactions || []).forEach(t => {
+      if (t.pending) return;
+      const amt = parseFloat(t.amount);
+      if (!amt) return;
+      if (amt > 0) { skippedIn++; return; }
+      const key = `${a.conn_id || ''}:${a.id}:${t.id}`;
+      if (haveIds.has(key)) return;
+      const epoch = t.transacted_at > 0 ? t.transacted_at : t.posted;
+      if (!(epoch > 0)) return;
+      const date = sfLocalDate(epoch);
+      const desc = String(t.description || '').replace(/\s+/g, ' ').trim() || 'Bank transaction';
+      const tgt = sfPeriodForDate(date, sched);
+      const row = { key, epoch, acctName, date, desc, amount: Math.abs(amt), ym: tgt.ym, periodIdx: tgt.periodIdx, approx: tgt.approx };
+      row.monthMissing = !months[row.ym];
+      row.dup = sfFindDuplicate(row, months);
+      row.cat = sfSuggestCat(desc, suggestions, catNames);
+      row.xfer = /transfer/i.test(desc);
+      row.bill = sfMatchBill(row, bills);
+      row.checked = !row.dup && !row.monthMissing && !row.xfer && !row.bill;
+      const prev = (prevRows || []).find(p => p.key === key);
+      if (prev) { row.cat = prev.cat; row.checked = prev.checked; }
+      rows.push(row);
+    });
+  });
+  rows.sort((x, y) => y.epoch - x.epoch);
+  return { rows, skippedIn };
+}
+
+function BankSyncPanel({ sf, setSf, review, setReview, months, sched, bills, cats, importBankTxns }) {
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [doneMsg, setDoneMsg] = useState('');
+  const [lookback, setLookback] = useState('30');
+  const { ask: confirmAsk, Dialog: ConfirmDialog } = useConfirm();
+  const catNames = (cats || []).map(c => c.name);
+  const connected = !!sf.accessUrl;
+  const sfAccounts = sf.accounts || [];
+
+  const connect = async () => {
+    setBusy(true); setErr(''); setDoneMsg('');
+    try {
+      const accessUrl = await sfClaim(token);
+      setSf(c => ({ handled: c.handled || {}, accessUrl, connectedAt: Date.now(), accountsOff: {}, syncTimes: [], lastSync: null, accounts: [] }));
+      setToken('');
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  const disconnect = () => confirmAsk(
+    'Disconnect SimpleFIN? This only removes the connection from this app. To fully revoke access, also delete the app connection in SimpleFIN Bridge.',
+    () => { setSf(c => ({ handled: c.handled || {} })); setReview(null); setErr(''); setDoneMsg(''); }
+  );
+
+  const sync = async () => {
+    setBusy(true); setErr(''); setDoneMsg('');
+    try {
+      const now = Date.now();
+      const times = (sf.syncTimes || []).filter(t => now - t < 86400000);
+      if (times.length >= SF_MAX_REQ_PER_DAY) throw new Error('Sync limit reached for today. SimpleFIN allows about 24 requests per day, so try again tomorrow.');
+      setSf(c => ({ ...c, syncTimes: [...times, now] }));
+      const data = await sfFetchAccounts(sf.accessUrl, Math.floor(now / 1000) - (+lookback) * 86400);
+      const haveIds = new Set(Object.keys(sf.handled || {}));
+      Object.values(months).forEach(m => (m.txns || []).forEach(t => { if (t.sfId) haveIds.add(t.sfId); }));
+      const { rows, skippedIn } = sfBuildRows({
+        data, haveIds, accountsOff: sf.accountsOff || {}, months, sched, bills, catNames,
+        suggestions: buildSuggestions(months || {}), prevRows: review ? review.rows : [],
+      });
+      const errors = (data.errlist || []).map(e => e.msg || e.code)
+        .concat((data.errors || []).map(e => typeof e === 'string' ? e : (e.msg || e.code || '')))
+        .filter(Boolean);
+      const nowSec = Math.floor(now / 1000);
+      setSf(c => {
+        const handled = {};
+        Object.entries(c.handled || {}).forEach(([k, v]) => { if (v > nowSec - 200 * 86400) handled[k] = v; });
+        const accounts = (data.accounts || []).map(a => ({ id: a.id, name: a.name, org: (a.org && (a.org.name || a.org.domain)) || '', balance: parseFloat(a.balance), date: a['balance-date'] || 0 }));
+        return { ...c, lastSync: now, handled, accounts };
+      });
+      setReview({ rows, skippedIn, errors, at: now });
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  const updRow = (key, patch) => setReview(rv => ({ ...rv, rows: rv.rows.map(r => r.key === key ? { ...r, ...patch } : r) }));
+  const setAll = checked => setReview(rv => ({ ...rv, rows: rv.rows.map(r => ({ ...r, checked })) }));
+  const dismiss = r => {
+    setSf(c => ({ ...c, handled: { ...(c.handled || {}), [r.key]: r.epoch } }));
+    setReview(rv => ({ ...rv, rows: rv.rows.filter(x => x.key !== r.key) }));
+  };
+  const selected = review ? review.rows.filter(r => r.checked) : [];
+  const selectedTotal = selected.reduce((s, r) => s + r.amount, 0);
+  const doImport = () => {
+    if (!selected.length) return;
+    importBankTxns(selected);
+    const keys = new Set(selected.map(r => r.key));
+    setSf(c => {
+      const handled = { ...(c.handled || {}) };
+      selected.forEach(r => { handled[r.key] = r.epoch; });
+      return { ...c, handled };
+    });
+    setReview(rv => ({ ...rv, rows: rv.rows.filter(r => !keys.has(r.key)) }));
+    setDoneMsg(`Imported ${selected.length} transaction${selected.length === 1 ? '' : 's'} into Month Budget.`);
+  };
+  const toggleAcct = id => setSf(c => ({ ...c, accountsOff: { ...(c.accountsOff || {}), [id]: !(c.accountsOff || {})[id] } }));
+
+  const note = { fontSize:12, color:'#475569', marginBottom:12, lineHeight:1.6 };
+
+  return (
+    <div style={S.card}>
+      {ConfirmDialog}
+      <SectionHeader icon="fa-link" title="Bank Sync (SimpleFIN)" accent={ACCENT.accounts}>
+        {connected && (
+          <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
+            <select value={lookback} onChange={e=>setLookback(e.target.value)} style={{ ...S.input, width:'auto', fontSize:12, padding:'5px 8px' }} title="How far back to look">
+              {[['14','Last 14 days'],['30','Last 30 days'],['60','Last 60 days'],['90','Last 90 days']].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+            </select>
+            <button onClick={sync} disabled={busy} style={{ ...S.btn, background:'#3b82f6', color:'#fff', fontWeight:600, opacity:busy?0.6:1 }}>
+              <i className={`fa-solid fa-arrows-rotate${busy?' fa-spin':''}`} style={{ marginRight:6 }} />{busy ? 'Syncing…' : 'Sync now'}
+            </button>
+            <button onClick={disconnect} disabled={busy} style={{ ...S.btn, color:'#94a3b8' }}>Disconnect</button>
+          </div>
+        )}
+      </SectionHeader>
+
+      {!connected && (
+        <>
+          <p style={note}>
+            Pull your bank transactions into Month Budget. Access is read-only, and you review every transaction before it is added.
+          </p>
+          <div style={{ ...note, background:'#0f1117', borderRadius:8, padding:'10px 14px' }}>
+            1. In SimpleFIN Bridge, open <b style={{ color:'#94a3b8' }}>Apps → New app connection</b>.<br />
+            2. Copy the <b style={{ color:'#94a3b8' }}>Setup Token</b>. It works only once.<br />
+            3. Paste it below and press Connect.
+          </div>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+            <input style={{ ...S.input, flex:1, minWidth:220 }} value={token} onChange={e=>setToken(e.target.value)} placeholder="Paste Setup Token" autoComplete="off" spellCheck={false} />
+            <button onClick={connect} disabled={busy || !token.trim()} style={{ ...S.btn, background:'#3b82f6', color:'#fff', fontWeight:600, opacity:(busy||!token.trim())?0.6:1 }}>{busy ? 'Connecting…' : 'Connect'}</button>
+          </div>
+        </>
+      )}
+
+      {err && <div style={{ marginTop:12, padding:'9px 12px', borderRadius:8, background:'#2a1215', border:'1px solid #7f1d1d', color:'#fca5a5', fontSize:12 }}>{err}</div>}
+      {doneMsg && <div style={{ marginTop:12, padding:'9px 12px', borderRadius:8, background:'#0c2418', border:'1px solid #14532d', color:'#86efac', fontSize:12 }}>{doneMsg}</div>}
+
+      {connected && (
+        <>
+          <div style={{ ...note, marginTop:10, marginBottom:10 }}>
+            {sf.lastSync ? <>Last synced {new Date(sf.lastSync).toLocaleString()}. </> : <>Not synced yet. </>}
+            Banks post transactions after they clear, so recent purchases can take a few days to show up. Money coming in (deposits and transfers in) is skipped.
+          </div>
+          {sfAccounts.length > 0 && (
+            <div style={{ marginBottom:14 }}>
+              <div style={S.lbl}>Accounts to import from</div>
+              {sfAccounts.map(a => (
+                <label key={a.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'6px 0', fontSize:13, cursor:'pointer' }}>
+                  <input type="checkbox" checked={!(sf.accountsOff || {})[a.id]} onChange={()=>toggleAcct(a.id)} />
+                  <span style={{ flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {a.org && <span style={{ color:'#64748b' }}>{a.org} · </span>}{a.name}
+                  </span>
+                  <span style={{ color:'#34d399', fontWeight:600 }}>{isNaN(a.balance) ? '—' : fmtS(a.balance)}</span>
+                </label>
+              ))}
+              <div style={{ fontSize:11, color:'#475569' }}>Changes apply on the next sync.</div>
+            </div>
+          )}
+
+          {review && review.errors && review.errors.length > 0 && (
+            <div style={{ marginBottom:12, padding:'9px 12px', borderRadius:8, background:'#2a2108', border:'1px solid #713f12', color:'#fcd34d', fontSize:12 }}>
+              {review.errors.map((m,i)=><div key={i}>{m}</div>)}
+            </div>
+          )}
+
+          {review && review.rows.length === 0 && (
+            <div style={{ color:'#475569', fontSize:13, padding:'8px 0' }}>
+              Nothing new to review{review.skippedIn ? ` (${review.skippedIn} incoming deposit${review.skippedIn===1?'':'s'} skipped)` : ''}.
+            </div>
+          )}
+
+          {review && review.rows.length > 0 && (
+            <>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8, marginBottom:6 }}>
+                <span style={{ fontSize:13, fontWeight:600, color:'#e2e8f0' }}>
+                  {review.rows.length} new to review
+                  {review.skippedIn ? <span style={{ fontWeight:400, color:'#475569' }}> · {review.skippedIn} deposit{review.skippedIn===1?'':'s'} skipped</span> : null}
+                </span>
+                <span style={{ display:'flex', gap:6 }}>
+                  <button onClick={()=>setAll(true)} style={{ ...S.btn, fontSize:11, padding:'3px 9px' }}>Select all</button>
+                  <button onClick={()=>setAll(false)} style={{ ...S.btn, fontSize:11, padding:'3px 9px' }}>None</button>
+                </span>
+              </div>
+              <div style={{ maxHeight:420, overflowY:'auto', marginBottom:12 }}>
+                {review.rows.map(r => (
+                  <div key={r.key} className="sf-row" style={{ opacity:r.checked?1:0.6 }}>
+                    <input className="sf-chk" type="checkbox" checked={r.checked} onChange={e=>updRow(r.key,{checked:e.target.checked})} />
+                    <div className="sf-desc">
+                      <div style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', color:'#e2e8f0' }} title={r.desc}>{r.desc}</div>
+                      <div style={{ fontSize:11, color:'#475569' }}>
+                        {shortDate(new Date(r.date + 'T12:00:00'))} · {r.acctName} · {monthLabel(r.ym).split(' ')[0].slice(0,3)} P{r.periodIdx+1}
+                        {r.dup && <span style={{ marginLeft:6, color:'#fbbf24' }}>possible duplicate</span>}
+                        {r.xfer && <span style={{ marginLeft:6, color:'#fbbf24' }}>looks like a transfer</span>}
+                        {r.bill && <span style={{ marginLeft:6, color:'#fbbf24' }}>may be your bill: {r.bill}</span>}
+                        {r.monthMissing && <span style={{ marginLeft:6, color:'#fb923c' }}>month not set up</span>}
+                        {r.approx && <span style={{ marginLeft:6, color:'#94a3b8' }}>no pay schedule match</span>}
+                      </div>
+                    </div>
+                    <select className="sf-cat" value={r.cat} onChange={e=>updRow(r.key,{cat:e.target.value})} style={{ ...S.input, fontSize:11, padding:'3px 6px' }}>
+                      {catNames.map(c=><option key={c}>{c}</option>)}
+                    </select>
+                    <span className="sf-amt" style={{ color:'#fbbf24', fontWeight:600 }}>{fmt(r.amount)}</span>
+                    <button className="sf-x" onClick={()=>dismiss(r)} title="Never show this one again" style={{ ...S.btn, padding:'1px 6px', fontSize:12, color:'#64748b', background:'transparent' }}>✕</button>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
+                <button onClick={doImport} disabled={!selected.length} style={{ ...S.btn, background:'#7c3aed', color:'#fff', fontWeight:600, opacity:selected.length?1:0.5 }}>
+                  <i className="fa-solid fa-check" style={{ marginRight:6 }} />Import {selected.length} selected
+                </button>
+                <span style={{ fontSize:12, color:'#64748b' }}>{fmt(selectedTotal)} total. Unchecked items stay here and come back on the next sync.</span>
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 function Accounts({ accounts, setAccounts, debts, bills }) {
   const [showAdd, setShowAdd] = useState(false);
